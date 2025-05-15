@@ -1,0 +1,28 @@
+# .gitignore
+
+# Python
+*.py[oc]
+__pycache__/
+*.egg-info
+.eggs/
+.mypy_cache/*
+.pyre/
+.pytest_cache/
+.ruff_cache/
+.dmypy.json
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Databases
+*.db
+
+# Logs
+rollouts/
+
+# Build artifacts
+build/
+dist/
+*.so
+out*/
+**/run_*/
