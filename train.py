@@ -248,7 +248,7 @@ class SingleFootContactReward(ksim.Reward):
         cmd_mag = jnp.linalg.norm(jnp.concatenate([lin_cmd, ang_cmd], axis=-1), axis=-1)
         reward = jnp.where(cmd_mag <= self.stand_still_threshold, 1.0, reward)
 
-        return reward * self.scale
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -886,7 +886,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_angular_force=0.7,
                 y_angular_force=0.7,
                 z_angular_force=0.7,
-                interval_range=(0.5, 4.0),
+                interval_range=(2.0, 4.0),
             ),
         ]
 
@@ -983,7 +983,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
-            ksim.UprightReward(scale=0.5),
+            ksim.UprightReward(scale=0.3),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
@@ -1002,8 +1002,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            SingleFootContactReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
-            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=1.0),
+            SingleFootContactReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
+            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.5),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
