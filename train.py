@@ -52,11 +52,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     # Model parameters.
     hidden_size: int = xax.field(
         value=128,
-        help="The hidden size for the MLPs.",
+        help="The hidden size for the RNN.",
     )
     depth: int = xax.field(
-        value=5,
-        help="The depth for the MLPs.",
+        value=3,
+        help="The depth for the RNN",
     )
     num_mixtures: int = xax.field(
         value=5,
@@ -387,7 +387,7 @@ class AngularVelocityCommandMarker(ksim.vis.Marker):
     radius: float = attrs.field(default=0.05)
     size: float = attrs.field(default=0.03)
     arrow_len: float = attrs.field(default=0.25)
-    height: float = attrs.field(default=0.5)
+    height: float = attrs.field(default=0.75)
 
     def update(self, trajectory: ksim.Trajectory) -> None:
         w = float(trajectory.command[self.command_name][0])
@@ -406,7 +406,7 @@ class AngularVelocityCommandMarker(ksim.vis.Marker):
         self.rgba = (0.2, 0.2, 1.0, 0.8) if w > 0 else (1.0, 0.5, 0.0, 0.8)
 
     @classmethod
-    def get(cls, command_name: str, *, height: float = 0.5) -> Self:
+    def get(cls, command_name: str, *, height: float = 0.75) -> Self:
         return cls(
             command_name=command_name,
             target_type="root",
@@ -422,7 +422,7 @@ class LinearVelocityCommandMarker(ksim.vis.Marker):
 
     command_name: str = attrs.field()
     size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=0.25)
+    arrow_scale: float = attrs.field(default=1.0)
     height: float = attrs.field(default=0.5)
 
     def update(self, trajectory: ksim.Trajectory) -> None:
@@ -858,11 +858,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=10.0),
             LinearVelocityTrackingReward(
-                scale=2.0,
+                scale=4.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
-                scale=1.0,
+                scale=3.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             ksim.UprightReward(scale=0.5),
