@@ -120,6 +120,7 @@ class FeetPhaseReward(ksim.Reward):
     ctrl_dt: float = 0.02
     sensitivity: float = 0.01
     stand_still_threshold: float = 0.01
+    joystick_cmd_name: str = "switching_joystick_command"
 
     def _gait_phase(self, phi: Array, swing_height: Array = jnp.array(0.08)) -> Array:
         """Interpolation logic for gait phase.
@@ -149,11 +150,13 @@ class FeetPhaseReward(ksim.Reward):
         error = jnp.sum((foot_z - ideal_z) ** 2, axis=-1)
         reward = jnp.exp(-error / self.sensitivity)
 
-        # no movement for small velocity command
-        vel_cmd = traj.command[self.linear_velocity_cmd_name]
-        ang_vel_cmd = traj.command[self.angular_velocity_cmd_name]
-        command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
-        reward *= command_norm > self.stand_still_threshold
+        # # no movement for small velocity command
+        # vel_cmd = traj.command[self.linear_velocity_cmd_name]
+        # ang_vel_cmd = traj.command[self.angular_velocity_cmd_name]
+        # command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
+        # reward *= command_norm > self.stand_still_threshold
+
+        reward *= 1.0 - traj.command[self.joystick_cmd_name][..., 0]  # zero when standing
         return reward
 
 
@@ -530,6 +533,24 @@ class LinearVelocityCommand(ksim.Command):
         return [LinearVelocityCommandMarker.get(self.command_name)]
 
 
+@attrs.define(frozen=True)
+class SwitchingJoystickCommand(ksim.JoystickCommand):
+    """Joystick command that switches during the trajectory."""
+
+    switch_prob: float = attrs.field(default=0.0)
+    sample_probs: tuple[float, ...] = attrs.field(default=())
+    in_robot_frame: bool = attrs.field(default=True)
+    marker_z_offset: float = attrs.field(default=0.5)
+
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
+
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -835,17 +856,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(
-                x_range=(-0.3, 0.7),
-                y_range=(-0.2, 0.2),
-                x_zero_prob=0.3,
-                y_zero_prob=0.4,
+            SwitchingJoystickCommand(
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            ),
-            AngularVelocityCommand(
-                scale=0.1,
-                zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                sample_probs=(0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1),
+                in_robot_frame=True,
             ),
             GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_range[0],
@@ -857,13 +871,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # Standard rewards.
             ksim.StayAliveReward(scale=5.0),
-            LinearVelocityTrackingReward(
-                scale=4.0,
-                stand_still_threshold=self.config.stand_still_threshold,
-            ),
-            AngularVelocityTrackingReward(
-                scale=4.0,
-                stand_still_threshold=self.config.stand_still_threshold,
+            ksim.JoystickReward(
+                forward_speed=1.0,
+                backward_speed=0.5,
+                strafe_speed=0.5,
+                rotation_speed=math.radians(30),
+                ang_vel_penalty_scale=0.3,
+                lin_vel_penalty_scale=0.3,
+                scale=1.5,
+                in_robot_frame=True,
+                command_name="switching_joystick_command",
             ),
             ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
@@ -911,7 +928,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
+        num_commands = 7 + 1  # ohe joystick + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -958,17 +975,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
+        ohe_joystick_cmd_7 = commands["switching_joystick_command"]
 
         obs = [
             timestep_phase_4,  # 4
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
-            lin_vel_cmd_2,  # 2
-            ang_vel_cmd,  # 1
+            ohe_joystick_cmd_7,  # 7
             gait_freq_cmd_1,  # 1
         ]
         if self.config.use_acc_gyro:
@@ -993,8 +1008,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
+        ohe_joystick_cmd_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         # privileged obs
@@ -1027,8 +1041,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_ang_vel_3,
                 feet_contact_4,
                 feet_position_6,
-                lin_vel_cmd_2,
-                ang_vel_cmd,
+                ohe_joystick_cmd_7,
                 gait_freq_cmd_1,
             ],
             axis=-1,
