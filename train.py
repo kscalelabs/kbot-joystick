@@ -186,6 +186,124 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class SingleFootContactReward(ksim.Reward):
+    """Reward that encourages a single-foot contact pattern during locomotion.
+
+    The reward returns ``1`` whenever exactly one foot is in contact with the
+    ground and the robot is commanded to move (i.e. *not* stand-still).  When
+    both feet are in contact or both are in the air the reward is ``0``.
+
+    For stand-still commands (whose magnitude is below ``stand_still_threshold``)
+    the reward is always ``1`` so as not to penalise recovery steps that may be
+    required in order to keep balance while standing.
+    """
+
+    scale: float = 1.0
+    feet_contact_obs_name: str = "feet_contact_observation"
+    linear_velocity_cmd_name: str = "linear_velocity_command"
+    angular_velocity_cmd_name: str = "angular_velocity_command"
+    stand_still_threshold: float = 0.01
+    ctrl_dt: float = 0.02
+    window_size: float = 0.2  # seconds
+
+    def _single_contact(self, contact: Array) -> Array:
+        """Returns a boolean mask that is ``True`` when exactly one foot is in contact."""
+        left_contact = jnp.any(contact[..., :2] > 0.5, axis=-1)
+        right_contact = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+        return jnp.logical_xor(left_contact, right_contact)
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        """Implements Eq. (14) – single-foot contact with 0.2 s window.
+
+        • reward = 1 if, within the past 0.2 s, there was at least one frame
+        where *exactly one* foot touched the ground **and** the command
+        magnitude exceeds `stand_still_threshold`.
+        • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
+        """
+        contact = traj.obs[self.feet_contact_obs_name]
+        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
+        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+        single = jnp.logical_xor(left, right)
+
+        k = int(self.window_size / self.ctrl_dt)
+
+        padded = jnp.concatenate([jnp.zeros_like(single[..., :k]), single], axis=-1)
+
+        window_any = (
+            jax.lax.reduce_window(
+                padded.astype(jnp.int32),
+                0,
+                jax.lax.add,
+                window_dimensions=(k + 1,),
+                window_strides=(1,),
+                padding="valid",
+            )
+            > 0
+        )
+
+        reward = window_any.astype(jnp.float32)
+
+        lin_cmd = traj.command[self.linear_velocity_cmd_name]
+        ang_cmd = traj.command[self.angular_velocity_cmd_name]
+        cmd_mag = jnp.linalg.norm(jnp.concatenate([lin_cmd, ang_cmd], axis=-1), axis=-1)
+        reward = jnp.where(cmd_mag <= self.stand_still_threshold, 1.0, reward)
+
+        return reward * self.scale
+
+
+@attrs.define(frozen=True, kw_only=True)
+class FeetAirtimeReward(ksim.Reward):
+    """Encourages reasonable step frequency by rewarding foot airtime.
+
+    Each foot accumulates a *positive* reward proportional to the duration it
+    spends in the air (i.e. not in contact).  Whenever the foot touches the
+    ground a small fixed penalty (``touchdown_penalty``) is applied.  This leads
+    to larger rewards for longer swing phases while discouraging excessively
+    rapid stepping.
+    """
+
+    scale: float = 1.0
+    feet_contact_obs_name: str = "feet_contact_observation"
+    ctrl_dt: float = 0.02
+    touchdown_penalty: float = 0.4
+
+    def _airtime_sequence(self, contact_bool: Array) -> Array:
+        """Returns an array with the airtime (in seconds) for each timestep."""
+
+        def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
+            new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
+            return new_time, new_time
+
+        _, airtime = jax.lax.scan(_body, 0.0, contact_bool)
+        return airtime
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        contact = traj.obs[self.feet_contact_obs_name]
+        left_in, right_in = contact[..., 0] > 0.5, contact[..., 1] > 0.5
+
+        # airtime counters
+        left_air = self._airtime_sequence(left_in)
+        right_air = self._airtime_sequence(right_in)
+
+        # touchdown boolean (0→1 transition)
+        def touchdown(c: Array) -> Array:
+            prev = jnp.concatenate([jnp.array([False]), c[:-1]])
+            return jnp.logical_and(c, jnp.logical_not(prev))
+
+        td_l = touchdown(left_in)
+        td_r = touchdown(right_in)
+
+        swing_reward = (left_air - 0.4) * td_l.astype(jnp.float32) + (right_air - 0.4) * td_r.astype(jnp.float32)
+
+        # standing mask
+        stand = (jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3) & (
+            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+        )
+
+        return jnp.where(stand, 1.0, swing_reward)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class JointPositionPenalty(ksim.JointDeviationPenalty):
     @classmethod
     def create_from_names(
@@ -856,7 +974,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            ksim.StayAliveReward(scale=1.0),
+            # ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(
                 scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
@@ -878,12 +996,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
+            SingleFootContactReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
+            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=1.0),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
