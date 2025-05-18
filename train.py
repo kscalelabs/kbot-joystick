@@ -74,9 +74,9 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     #     value=(1.2, 1.5),
     #     help="The range of gait frequencies to use.",
     # )
-    stand_still_threshold: float = xax.field( # TODO assert dominance over this 
+    stand_still_threshold: float = xax.field(
         value=0.1,
-        help="The threshold for standing still.",
+        help="The mininum command magnitude. Don't like tiny Vx commands like 0.00123",
     )
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
@@ -111,7 +111,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
     render_full_every_n_seconds: float = xax.field(
-        value=60.0 * 10.0,
+        value=0,  # ALWAYS!
         help="Render the trajectory (without associated graphs) every N seconds",
     )
 
@@ -202,7 +202,7 @@ class SingleFootContactReward(ksim.Reward):
     ground and the robot is commanded to move (i.e. *not* stand-still).  When
     both feet are in contact or both are in the air the reward is ``0``.
 
-    For stand-still commands (whose magnitude is below ``stand_still_threshold``)
+    For stand-still commands 
     the reward is always ``1`` so as not to penalise recovery steps that may be
     required in order to keep balance while standing.
     """
@@ -211,7 +211,6 @@ class SingleFootContactReward(ksim.Reward):
     feet_contact_obs_name: str = "feet_contact_observation"
     linear_velocity_cmd_name: str = "linear_velocity_command"
     angular_velocity_cmd_name: str = "angular_velocity_command"
-    stand_still_threshold: float = 0.01
     ctrl_dt: float = 0.02
     window_size: float = 0.2  # seconds
 
@@ -226,7 +225,7 @@ class SingleFootContactReward(ksim.Reward):
 
         • reward = 1 if, within the past 0.2 s, there was at least one frame
         where *exactly one* foot touched the ground **and** the command
-        magnitude exceeds `stand_still_threshold`.
+        magnitude is nonzero
         • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
         """
         contact = traj.obs[self.feet_contact_obs_name]
@@ -255,7 +254,7 @@ class SingleFootContactReward(ksim.Reward):
         lin_cmd = traj.command[self.linear_velocity_cmd_name]
         ang_cmd = traj.command[self.angular_velocity_cmd_name]
         cmd_mag = jnp.linalg.norm(jnp.concatenate([lin_cmd, ang_cmd], axis=-1), axis=-1)
-        reward = jnp.where(cmd_mag <= self.stand_still_threshold, 1.0, reward)
+        reward = jnp.where(cmd_mag <= 0.01, 1.0, reward)
 
         return reward
 
@@ -395,7 +394,6 @@ class LinearVelocityTrackingReward(ksim.Reward):
     linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.linvel_obs_name not in trajectory.obs:
@@ -416,7 +414,6 @@ class AngularVelocityTrackingReward(ksim.Reward):
     angvel_obs_name: str = attrs.field(default="sensor_observation_base_site_angvel")
     command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         if self.angvel_obs_name not in trajectory.obs:
@@ -587,12 +584,13 @@ class AngularVelocityCommand(ksim.Command):
     scale: float = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
+    min_magnitude: float = attrs.field(default=0.01)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         """Returns (1,) array with angular velocity."""
         rng_a, rng_b = jax.random.split(rng)
-        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
         cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob) or jnp.abs(cmd) < self.min_magnitude
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(
@@ -624,14 +622,15 @@ class LinearVelocityCommand(ksim.Command):
     switch_prob: float = attrs.field(default=0.0)
     vis_height: float = attrs.field(default=1.0)
     vis_scale: float = attrs.field(default=0.05)
+    min_magnitude: float = attrs.field(default=0.01)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
+        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob) or jnp.abs(x) < self.min_magnitude # don't like small commands,
+        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob) or jnp.abs(y) < self.min_magnitude
         return jnp.concatenate(
             [
                 jnp.where(x_zero_mask, 0.0, x),
@@ -962,11 +961,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_zero_prob=0.5,
                 y_zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                min_magnitude=self.config.stand_still_threshold,
             ),
             AngularVelocityCommand(
                 scale=0.5,
                 zero_prob=0.9,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                min_magnitude=self.config.stand_still_threshold,
             ),
             # GaitFrequencyCommand(
             #     gait_freq_lower=self.config.gait_freq_range[0],
@@ -978,14 +979,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # Standard rewards.
             # ksim.StayAliveReward(scale=1.0),
-            LinearVelocityTrackingReward(
-                scale=1.0,
-                stand_still_threshold=self.config.stand_still_threshold, # TODO fix this and randomization
-            ),
-            AngularVelocityTrackingReward(
-                scale=1.0,
-                stand_still_threshold=self.config.stand_still_threshold,
-            ),
+            LinearVelocityTrackingReward(scale=1.0),
+            AngularVelocityTrackingReward(scale=1.0),
             ksim.UprightReward(scale=0.3),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
@@ -999,13 +994,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1), # TODO best to have this in joint space vs pos space. looks like it is.
             # StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             # FeetSlipPenalty(scale=-0.25),
             # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
             #     scale=-0.03,
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             # ),
-            SingleFootContactReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
+            SingleFootContactReward(scale=0.3),
             FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.5),
         ]
 
