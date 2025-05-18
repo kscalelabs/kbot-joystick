@@ -250,6 +250,52 @@ class SingleFootContactReward(ksim.Reward):
 
         return reward
 
+@attrs.define(frozen=True, kw_only=True)
+class AlternatingSingleFootReward(ksim.Reward):
+    """Alternating single-support.
+
+    • reward = 1 in the past window the robot went from left-only to
+      right-only contact (or vice-versa) at least once
+    • While standing (|cmd| ≤ threshold) reward is fixed to 1.
+    """
+
+    scale: float = 1.0
+    feet_contact_obs_name: str = "feet_contact_observation"
+    linear_velocity_cmd_name: str = "linear_velocity_command"
+    angular_velocity_cmd_name: str = "angular_velocity_command"
+    ctrl_dt: float = 0.02
+    stand_still_threshold: float = 0.01
+    window_size: float = 0.2
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        contact = traj.obs[self.feet_contact_obs_name]
+        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
+        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+
+        left_only = jnp.logical_and(left,  jnp.logical_not(right))
+        right_only = jnp.logical_and(right, jnp.logical_not(left))
+
+        side = jnp.where(left_only,  1,
+               jnp.where(right_only, -1, 0)).astype(jnp.int8)
+
+        k = int(self.window_size / self.ctrl_dt)
+        win = side[..., -k:]
+
+        has_L = jnp.any(win ==  1, axis=-1)
+        has_R = jnp.any(win == -1, axis=-1)
+        diff = jnp.abs(win[..., 1:] - win[..., :-1])
+        switched = jnp.any(diff == 2, axis=-1)
+
+        alternating = has_L & has_R & switched
+
+        v_cmd = traj.command[self.linear_velocity_cmd_name]
+        w_cmd = traj.command[self.angular_velocity_cmd_name]
+        cmd_mag = jnp.linalg.norm(jnp.concatenate([v_cmd, w_cmd], axis=-1),
+                                  axis=-1)
+        standing = cmd_mag <= self.stand_still_threshold
+
+        reward = jnp.where(standing | alternating, 1.0, 0.0)
+        return reward * self.scale
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.Reward):
@@ -1002,7 +1048,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            SingleFootContactReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
+            AlternatingSingleFootReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
+            # SingleFootContactReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
             FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.5),
         ]
 
@@ -1250,6 +1297,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            learning_rate=1e-3,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
