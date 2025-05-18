@@ -110,7 +110,7 @@ class FeetPhaseReward(ksim.Reward):
 
     scale: float = 1.0
     feet_pos_obs_name: str = "feet_position_observation"
-    joystick_cmd_name: str = "joystick_command"
+    joystick_cmd_name: str = "switching_joystick_command"
     gait_freq_cmd_name: str = "gait_frequency_command"
     max_foot_height: float = 0.12
     ctrl_dt: float = 0.02
@@ -272,6 +272,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
     """Observation of the phase of the timestep (matches gait phase calculation in FeetPhaseReward)."""
 
     ctrl_dt: float = attrs.field(default=0.02)
+    joystick_cmd_name: str = "switching_joystick_command"
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         gait_freq = state.commands["gait_frequency_command"]
@@ -283,7 +284,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
         phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
 
         # Stand still case
-        joystick_cmd = state.commands["joystick_command"]
+        joystick_cmd = state.commands[self.joystick_cmd_name]
         # Check if the "stand still" command (index 0 of one-hot encoded vector) is active.
         is_stand_still_command = joystick_cmd[..., 0] == 1.0
         phase = jnp.where(
@@ -330,6 +331,24 @@ class FeetPositionObservation(ksim.Observation):
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([fl, fr], axis=-1)
+
+
+@attrs.define(frozen=True)
+class SwitchingJoystickCommand(ksim.JoystickCommand):
+    """Joystick command that switches during the trajectory."""
+
+    switch_prob: float = attrs.field(default=0.0)
+    sample_probs: tuple[float, ...] = attrs.field(default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05))
+    in_robot_frame: bool = attrs.field(default=True)
+    marker_z_offset: float = attrs.field(default=0.5)
+
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_commands, prev_command)
 
 
 class Actor(eqx.Module):
@@ -546,6 +565,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_noise=math.radians(5),
+            action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -566,11 +587,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_force=0.5,
                 y_force=0.5,
                 z_force=0.3,
-                force_range=(0.5, 1.0),
-                x_angular_force=0.0,
-                y_angular_force=0.0,
-                z_angular_force=0.0,
-                interval_range=(0.5, 4.0),
+                force_range=(0.5, 2.0),
+                x_angular_force=0.7,
+                y_angular_force=0.7,
+                z_angular_force=0.7,
+                interval_range=(2.0, 4.0),
             ),
         ]
 
@@ -584,7 +605,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             TimestepPhaseObservation(),
             ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(10)),
+            ksim.JointVelocityObservation(noise=math.radians(20)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -599,17 +620,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=math.radians(1),
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.5,
+                noise=1.0,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -637,7 +658,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            ksim.JoystickCommand(in_robot_frame=True),
+            SwitchingJoystickCommand(switch_prob=self.config.dt / 3, in_robot_frame=True),
             GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_range[0],
                 gait_freq_upper=self.config.gait_freq_range[1],
@@ -657,6 +678,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 lin_vel_penalty_scale=0.3,
                 scale=1.5,
                 in_robot_frame=True,
+                command_name="switching_joystick_command",
             ),
             ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
@@ -750,7 +772,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         obs = [
@@ -783,7 +805,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        joystick_cmd_ohe_7 = commands["joystick_command"]
+        joystick_cmd_ohe_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         # privileged obs
