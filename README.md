@@ -9,7 +9,7 @@
 </div>
 
 ## Overview
-This repository contains an example of a joystick controller for the K-Bot humanoid robot. It currently takes significantly longer than the K-Sim Gym example to train (~3000 steps vs ~150 steps).
+This repository contains an example of a joystick controller for the K-Bot humanoid robot that is actively under development. It currently takes significantly longer than the K-Sim Gym example to train (~3000 steps vs ~150 steps).
 
 If you think you can bring that time down though, have a crack at it!
 
