@@ -110,6 +110,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="Entropy coefficient for PPO: high = more exploration.",
     )
 
+    render_full_every_n_seconds: float = xax.field(
+        value=60.0 * 10.0,
+        help="Render the trajectory (without associated graphs) every N seconds",
+    )
+
 
 # @attrs.define(frozen=True, kw_only=True)
 # class FeetPhaseReward(ksim.Reward):
@@ -420,9 +425,6 @@ class AngularVelocityTrackingReward(ksim.Reward):
         command = trajectory.command[self.command_name]
         ang_vel_error = jnp.square(command.flatten() - trajectory.obs[self.angvel_obs_name][..., 2])
         reward_value = jnp.exp(-ang_vel_error / self.error_scale)
-
-        command_norm = jnp.linalg.norm(command, axis=-1)
-        reward_value *= command_norm > self.stand_still_threshold
 
         return reward_value
 
