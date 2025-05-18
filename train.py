@@ -337,7 +337,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
+    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel") # TODO is this global or local frame
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
@@ -891,8 +891,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # Standard rewards.
             # ksim.StayAliveReward(scale=1.0),
-            LinearVelocityTrackingReward(scale=1.0),
-            AngularVelocityTrackingReward(scale=1.0),
+            LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
+            AngularVelocityTrackingReward(scale=1.0, error_scale=0.1),
             ksim.UprightReward(scale=0.3),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
