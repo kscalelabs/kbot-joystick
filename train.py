@@ -338,7 +338,9 @@ class SwitchingJoystickCommand(ksim.JoystickCommand):
     """Joystick command that switches during the trajectory."""
 
     switch_prob: float = attrs.field(default=0.0)
-    sample_probs: tuple[float, ...] = attrs.field(default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05))
+    sample_probs: tuple[float, float, float, float, float, float, float] = attrs.field(
+        default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05)
+    )
     in_robot_frame: bool = attrs.field(default=True)
     marker_z_offset: float = attrs.field(default=0.5)
 

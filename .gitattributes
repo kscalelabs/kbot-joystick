@@ -1,1 +1,4 @@
+*.kinfer filter=lfs diff=lfs merge=lfs -text
+*.mp4 filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
 assets/joystick.mp4 filter=lfs diff=lfs merge=lfs -text
