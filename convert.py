@@ -13,6 +13,9 @@ from kinfer.export.serialize import pack
 
 from train import HumanoidWalkingTask, Model
 
+GAIT_FREQ = jnp.array([1.2])
+CTRL_DT = 0.02
+
 
 def make_export_model(model: Model) -> Callable:
     def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
@@ -44,6 +47,7 @@ def main() -> None:
     # Constant values.
     carry_shape = (task.config.depth, task.config.hidden_size)
     num_joints = len(joint_names)
+    num_commands = 7  # joystick command
 
     @jax.jit
     def init_fn() -> Array:
@@ -56,13 +60,35 @@ def main() -> None:
         projected_gravity: Array,
         accelerometer: Array,
         gyroscope: Array,
+        time: Array,
+        command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        steps = time / CTRL_DT
+        phase_dt = 2 * jnp.pi * GAIT_FREQ * CTRL_DT
+        start_phase = jnp.array([0, jnp.pi])
+        phase = start_phase + steps * phase_dt
+        phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+        # Stand still case
+        joystick_cmd = command
+        is_stand_still_command = joystick_cmd[..., 0] == 1.0
+        phase = jnp.where(
+            is_stand_still_command,
+            jnp.array([jnp.pi / 2, jnp.pi]),
+            phase,
+        )
+        timestep_phase_4 = jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
+
+        # Check if the "stand still" command (index 0 of one-hot encoded vector) is active.
         obs = jnp.concatenate(
             [
+                timestep_phase_4,
                 joint_angles,
                 joint_angular_velocities,
                 projected_gravity,
+                command,
+                GAIT_FREQ,
                 accelerometer,
                 gyroscope,
             ],
@@ -74,12 +100,14 @@ def main() -> None:
     init_onnx = export_fn(
         model=init_fn,
         num_joints=num_joints,
+        num_commands=num_commands,
         carry_shape=carry_shape,
     )
 
     step_onnx = export_fn(
         model=step_fn,
         num_joints=num_joints,
+        num_commands=num_commands,
         carry_shape=carry_shape,
     )
 
@@ -88,6 +116,7 @@ def main() -> None:
         step_fn=step_onnx,
         joint_names=joint_names,
         carry_shape=carry_shape,
+        num_commands=num_commands,
     )
 
     # Saves the resulting model.

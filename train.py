@@ -4,7 +4,7 @@ import asyncio
 import functools
 import math
 from dataclasses import dataclass
-from typing import Collection, Self
+from typing import Self
 
 import attrs
 import distrax
@@ -55,8 +55,8 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The hidden size for the RNN.",
     )
     depth: int = xax.field(
-        value=3,
-        help="The depth for the RNN",
+        value=5,
+        help="The depth for the RNN.",
     )
     num_mixtures: int = xax.field(
         value=5,
@@ -74,10 +74,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=(1.2, 1.5),
         help="The range of gait frequencies to use.",
     )
-    stand_still_threshold: float = xax.field(
-        value=0.01,
-        help="The threshold for standing still.",
-    )
+
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
         value=100,
@@ -113,13 +110,11 @@ class FeetPhaseReward(ksim.Reward):
 
     scale: float = 1.0
     feet_pos_obs_name: str = "feet_position_observation"
-    linear_velocity_cmd_name: str = "linear_velocity_command"
-    angular_velocity_cmd_name: str = "angular_velocity_command"
+    joystick_cmd_name: str = "switching_joystick_command"
     gait_freq_cmd_name: str = "gait_frequency_command"
     max_foot_height: float = 0.12
     ctrl_dt: float = 0.02
     sensitivity: float = 0.01
-    stand_still_threshold: float = 0.01
 
     def _gait_phase(self, phi: Array, swing_height: Array = jnp.array(0.08)) -> Array:
         """Interpolation logic for gait phase.
@@ -149,11 +144,7 @@ class FeetPhaseReward(ksim.Reward):
         error = jnp.sum((foot_z - ideal_z) ** 2, axis=-1)
         reward = jnp.exp(-error / self.sensitivity)
 
-        # no movement for small velocity command
-        vel_cmd = traj.command[self.linear_velocity_cmd_name]
-        ang_vel_cmd = traj.command[self.angular_velocity_cmd_name]
-        command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
-        reward *= command_norm > self.stand_still_threshold
+        reward *= 1.0 - traj.command[self.joystick_cmd_name][..., 0]  # zero when standing
         return reward
 
 
@@ -260,54 +251,6 @@ class StraightLegPenalty(JointPositionPenalty):
         )
 
 
-@attrs.define(frozen=True, kw_only=True)
-class LinearVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the linear velocity."""
-
-    error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
-    command_name: str = attrs.field(default="linear_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.0)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
-        command = trajectory.command[self.command_name]
-        lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
-        reward_value = jnp.exp(-lin_vel_error / self.error_scale)
-
-        command_norm = jnp.linalg.norm(command, axis=-1)
-        reward_value *= command_norm > self.stand_still_threshold
-
-        return reward_value
-
-
-@attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the angular velocity."""
-
-    error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="sensor_observation_base_site_angvel")
-    command_name: str = attrs.field(default="angular_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
-    stand_still_threshold: float = attrs.field(default=0.0)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        if self.angvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
-
-        command = trajectory.command[self.command_name]
-        ang_vel_error = jnp.square(command.flatten() - trajectory.obs[self.angvel_obs_name][..., 2])
-        reward_value = jnp.exp(-ang_vel_error / self.error_scale)
-
-        command_norm = jnp.linalg.norm(command, axis=-1)
-        reward_value *= command_norm > self.stand_still_threshold
-
-        return reward_value
-
-
 @attrs.define(frozen=True)
 class GaitFrequencyCommand(ksim.Command):
     """Command that holds a (1,) gait-frequency value."""
@@ -329,6 +272,7 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
     """Observation of the phase of the timestep (matches gait phase calculation in FeetPhaseReward)."""
 
     ctrl_dt: float = attrs.field(default=0.02)
+    joystick_cmd_name: str = "switching_joystick_command"
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         gait_freq = state.commands["gait_frequency_command"]
@@ -338,6 +282,16 @@ class TimestepPhaseObservation(ksim.TimestepObservation):
         start_phase = jnp.array([0, jnp.pi])
         phase = start_phase + steps * phase_dt
         phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
+
+        # Stand still case
+        joystick_cmd = state.commands[self.joystick_cmd_name]
+        # Check if the "stand still" command (index 0 of one-hot encoded vector) is active.
+        is_stand_still_command = joystick_cmd[..., 0] == 1.0
+        phase = jnp.where(
+            is_stand_still_command,
+            jnp.array([jnp.pi / 2, jnp.pi]),  # stand still position
+            phase,
+        )
 
         return jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
 
@@ -379,100 +333,14 @@ class FeetPositionObservation(ksim.Observation):
         return jnp.concatenate([fl, fr], axis=-1)
 
 
-@attrs.define(kw_only=True)
-class AngularVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the 1-D yaw-rate command."""
-
-    command_name: str = attrs.field()
-    radius: float = attrs.field(default=0.05)
-    size: float = attrs.field(default=0.03)
-    arrow_len: float = attrs.field(default=0.25)
-    height: float = attrs.field(default=0.75)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        w = float(trajectory.command[self.command_name][0])
-        self.pos = (0.0, 0.0, self.height)
-
-        if abs(w) < 1e-4:  # zero → grey sphere
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-            self.scale = (self.radius, self.radius, self.radius)
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-            return
-
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        self.scale = (self.size, self.size, self.arrow_len)
-        direction = (0.0, 0.0, 1.0 if w > 0 else -1.0)
-        self.orientation = self.quat_from_direction(direction)
-        self.rgba = (0.2, 0.2, 1.0, 0.8) if w > 0 else (1.0, 0.5, 0.0, 0.8)
-
-    @classmethod
-    def get(cls, command_name: str, *, height: float = 0.75) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
-            scale=(0.0, 0.0, 0.0),
-            height=height,
-        )
-
-
-@attrs.define(kw_only=True)
-class LinearVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the planar (x,y) velocity command."""
-
-    command_name: str = attrs.field()
-    size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=1.0)
-    height: float = attrs.field(default=0.5)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        vx, vy = map(float, trajectory.command[self.command_name])
-        speed = (vx * vx + vy * vy) ** 0.5
-        self.pos = (0.0, 0.0, self.height)
-
-        if speed < 1e-4:  # zero → grey sphere
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-            self.scale = (self.size, self.size, self.size)
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-            return
-
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        self.scale = (self.size, self.size, self.arrow_scale * speed)
-        self.orientation = self.quat_from_direction((vx, vy, 0.0))
-        self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        *,
-        arrow_scale: float = 0.25,
-        height: float = 0.5,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
-            scale=(0.0, 0.0, 0.0),
-            arrow_scale=arrow_scale,
-            height=height,
-        )
-
-
 @attrs.define(frozen=True)
-class AngularVelocityCommand(ksim.Command):
-    """Command to turn the robot."""
+class SwitchingJoystickCommand(ksim.JoystickCommand):
+    """Joystick command that switches during the trajectory."""
 
-    scale: float = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        """Returns (1,) array with angular velocity."""
-        rng_a, rng_b = jax.random.split(rng)
-        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
-        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+    sample_probs: tuple[float, ...] = attrs.field(default=(0.1, 0.5, 0.1, 0.1, 0.1, 0.05, 0.05))
+    in_robot_frame: bool = attrs.field(default=True)
+    marker_z_offset: float = attrs.field(default=0.5)
 
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
@@ -481,53 +349,6 @@ class AngularVelocityCommand(ksim.Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[ksim.vis.Marker]:
-        return [AngularVelocityCommandMarker.get(self.command_name)]
-
-
-@attrs.define(frozen=True)
-class LinearVelocityCommand(ksim.Command):
-    """Command to move the robot in a straight line.
-
-    By convention, X is forward and Y is left. The switching probability is the
-    probability of resampling the command at each step. The zero probability is
-    the probability of the command being zero - this can be used to turn off
-    any command.
-    """
-
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob)
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
-        )
-
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[ksim.vis.Marker]:
-        return [LinearVelocityCommandMarker.get(self.command_name)]
 
 
 class Actor(eqx.Module):
@@ -744,6 +565,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_noise=math.radians(5),
+            action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -761,14 +584,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
+                x_force=0.5,
+                y_force=0.5,
                 z_force=0.3,
-                force_range=(0.3, 1.5),
+                force_range=(0.5, 2.0),
                 x_angular_force=0.7,
                 y_angular_force=0.7,
                 z_angular_force=0.7,
-                interval_range=(0.5, 4.0),
+                interval_range=(2.0, 4.0),
             ),
         ]
 
@@ -782,7 +605,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             TimestepPhaseObservation(),
             ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(10)),
+            ksim.JointVelocityObservation(noise=math.radians(20)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -797,17 +620,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=math.radians(1),
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.5,
+                noise=1.0,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -835,18 +658,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(
-                x_range=(-0.3, 0.7),
-                y_range=(-0.2, 0.2),
-                x_zero_prob=0.3,
-                y_zero_prob=0.4,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            ),
-            AngularVelocityCommand(
-                scale=0.1,
-                zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            ),
+            SwitchingJoystickCommand(switch_prob=self.config.dt / 3, in_robot_frame=True),
             GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_range[0],
                 gait_freq_upper=self.config.gait_freq_range[1],
@@ -857,13 +669,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # Standard rewards.
             ksim.StayAliveReward(scale=10.0),
-            LinearVelocityTrackingReward(
-                scale=4.0,
-                stand_still_threshold=self.config.stand_still_threshold,
-            ),
-            AngularVelocityTrackingReward(
-                scale=3.0,
-                stand_still_threshold=self.config.stand_still_threshold,
+            ksim.JoystickReward(
+                forward_speed=1.0,
+                backward_speed=0.5,
+                strafe_speed=0.5,
+                rotation_speed=math.radians(30),
+                ang_vel_penalty_scale=0.3,
+                lin_vel_penalty_scale=0.3,
+                scale=1.5,
+                in_robot_frame=True,
+                command_name="switching_joystick_command",
             ),
             ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
@@ -878,7 +693,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            FeetPhaseReward(scale=1.0, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=1.0, max_foot_height=0.18),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
@@ -899,7 +714,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
-            min_level=0.1,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
@@ -911,7 +725,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
+        num_commands = 7 + 1  # joystick OHE + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -958,8 +772,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
+        joystick_cmd_ohe_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         obs = [
@@ -967,8 +780,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
-            lin_vel_cmd_2,  # 2
-            ang_vel_cmd,  # 1
+            joystick_cmd_ohe_7,  # 7
             gait_freq_cmd_1,  # 1
         ]
         if self.config.use_acc_gyro:
@@ -993,8 +805,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
+        joystick_cmd_ohe_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         # privileged obs
@@ -1027,8 +838,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_ang_vel_3,
                 feet_contact_4,
                 feet_position_6,
-                lin_vel_cmd_2,
-                ang_vel_cmd,
+                joystick_cmd_ohe_7,
                 gait_freq_cmd_1,
             ],
             axis=-1,
