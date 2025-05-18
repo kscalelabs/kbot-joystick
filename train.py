@@ -70,10 +70,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
-    # gait_freq_range: tuple[float, float] = xax.field(
-    #     value=(1.2, 1.5),
-    #     help="The range of gait frequencies to use.",
-    # )
     stand_still_threshold: float = xax.field(
         value=0.1,
         help="The mininum command magnitude. Don't like tiny Vx commands like 0.00123",
@@ -114,56 +110,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0,  # ALWAYS!
         help="Render the trajectory (without associated graphs) every N seconds",
     )
-
-
-# @attrs.define(frozen=True, kw_only=True)
-# class FeetPhaseReward(ksim.Reward):
-#     """Tracks swing / stance phasing of the feet."""
-
-#     scale: float = 1.0
-#     feet_pos_obs_name: str = "feet_position_observation"
-#     linear_velocity_cmd_name: str = "linear_velocity_command"
-#     angular_velocity_cmd_name: str = "angular_velocity_command"
-#     gait_freq_cmd_name: str = "gait_frequency_command"
-#     max_foot_height: float = 0.12
-#     ctrl_dt: float = 0.02
-#     sensitivity: float = 0.01
-#     stand_still_threshold: float = 0.01
-
-#     def _gait_phase(self, phi: Array, swing_height: Array = jnp.array(0.08)) -> Array:
-#         """Interpolation logic for gait phase.
-
-#         https://arxiv.org/pdf/2201.00206
-#         """
-#         x = jnp.clip((phi + jnp.pi) / (2 * jnp.pi), 0, 1)
-#         stance = xax.cubic_bezier_interpolation(jnp.array(0.0), swing_height, 2 * x)
-#         swing = xax.cubic_bezier_interpolation(swing_height, jnp.array(0.0), 2 * x - 1)
-#         return jnp.where(x <= 0.5, stance, swing)
-
-#     def get_reward(self, traj: ksim.Trajectory) -> Array:
-#         foot_pos = traj.obs[self.feet_pos_obs_name]
-#         gait_freq = traj.command[self.gait_freq_cmd_name]
-
-#         phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
-#         steps = jnp.repeat(jnp.int32(traj.timestep / self.ctrl_dt)[:, None], 2, axis=1)
-
-#         phase = (
-#             jnp.fmod(jnp.broadcast_to(jnp.array([0.0, jnp.pi]), steps.shape) + steps * phase_dt + jnp.pi, 2 * jnp.pi)
-#             - jnp.pi
-#         )
-
-#         ideal_z = self._gait_phase(phase, jnp.array(self.max_foot_height))
-
-#         foot_z = jnp.stack([foot_pos[..., 2], foot_pos[..., 5]], axis=-1)
-#         error = jnp.sum((foot_z - ideal_z) ** 2, axis=-1)
-#         reward = jnp.exp(-error / self.sensitivity)
-
-#         # no movement for small velocity command
-#         vel_cmd = traj.command[self.linear_velocity_cmd_name]
-#         ang_vel_cmd = traj.command[self.angular_velocity_cmd_name]
-#         command_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
-#         reward *= command_norm > self.stand_still_threshold
-#         return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -424,40 +370,6 @@ class AngularVelocityTrackingReward(ksim.Reward):
         reward_value = jnp.exp(-ang_vel_error / self.error_scale)
 
         return reward_value
-
-
-# @attrs.define(frozen=True, kw_only=True)
-# class GaitFrequencyCommand(ksim.Command):
-#     """Command that holds a (1,) gait-frequency value."""
-
-#     gait_freq_lower: float = 1.2
-#     gait_freq_upper: float = 1.5
-
-#     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-#         return jax.random.uniform(rng, (1,), minval=self.gait_freq_lower, maxval=self.gait_freq_upper)
-
-#     def __call__(
-#         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-#     ) -> Array:
-#         return prev_command
-
-
-# @attrs.define(frozen=True, kw_only=True)
-# class TimestepPhaseObservation(ksim.TimestepObservation):
-#     """Observation of the phase of the timestep (matches gait phase calculation in FeetPhaseReward)."""
-
-#     ctrl_dt: float = attrs.field(default=0.02)
-
-#     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-#         gait_freq = state.commands["gait_frequency_command"]
-#         timestep = super().observe(state, curriculum_level, rng)
-#         steps = timestep / self.ctrl_dt
-#         phase_dt = 2 * jnp.pi * gait_freq * self.ctrl_dt
-#         start_phase = jnp.array([0, jnp.pi])
-#         phase = start_phase + steps * phase_dt
-#         phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
-
-#         return jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
 
 
 @attrs.define(frozen=True, kw_only=True)
