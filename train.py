@@ -32,15 +32,15 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_shoulder_yaw_02", 0.0, 1.0),
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
-    ("dof_right_hip_pitch_04", math.radians(-20.0), 1.0),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
+    ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
-    ("dof_right_knee_04", math.radians(-50.0), 1.0),
+    ("dof_right_knee_04", math.radians(-50.0), 0.01),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
-    ("dof_left_hip_pitch_04", math.radians(20.0), 1.0),
-    ("dof_left_hip_roll_03", math.radians(0.0), 2.0),
+    ("dof_left_hip_pitch_04", math.radians(20.0), 0.01),
+    ("dof_left_hip_roll_03", math.radians(0.0), 1.0),
     ("dof_left_hip_yaw_03", 0.0, 2.0),
-    ("dof_left_knee_04", math.radians(50.0), 1.0),
+    ("dof_left_knee_04", math.radians(50.0), 0.01),
     ("dof_left_ankle_02", math.radians(-30.0), 1.0),
 ]
 
@@ -59,7 +59,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The depth for the RNN",
     )
     num_mixtures: int = xax.field(
-        value=5,
+        value=7,
         help="The number of mixtures for the actor.",
     )
     var_scale: float = xax.field(
@@ -765,6 +765,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_noise=math.radians(5),
+            action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -789,7 +791,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_angular_force=0.7,
                 y_angular_force=0.7,
                 z_angular_force=0.7,
-                interval_range=(0.5, 4.0),
+                interval_range=(1.5, 4.0),
             ),
         ]
 
@@ -803,7 +805,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             TimestepPhaseObservation(),
             ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(10)),
+            ksim.JointVelocityObservation(noise=math.radians(30)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -818,17 +820,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=math.radians(1),
+                noise=0.05,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.5,
+                noise=1.5,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -858,7 +860,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             SwitchingJoystickCommand(
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-                sample_probs=(0.2, 0.2, 0.2, 0.1, 0.1, 0.1, 0.1),
+                sample_probs=(0.2, 0.3, 0.2, 0.05, 0.05, 0.1, 0.1),
                 in_robot_frame=True,
             ),
             GaitFrequencyCommand(
@@ -870,7 +872,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            ksim.StayAliveReward(scale=5.0),
+            ksim.StayAliveReward(scale=10.0),
             ksim.JoystickReward(
                 forward_speed=1.0,
                 backward_speed=0.5,
@@ -895,7 +897,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            FeetPhaseReward(scale=1.0, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=1.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
@@ -1143,6 +1145,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
+            learning_rate=1e-3,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
