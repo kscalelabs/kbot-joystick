@@ -13,6 +13,9 @@ from kinfer.export.serialize import pack
 
 from train import HumanoidWalkingTask, Model
 
+NUM_COMMANDS_JOYSTICK = 7
+NUM_COMMANDS_MODEL = 3
+
 
 def make_export_model(model: Model) -> Callable:
     def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
@@ -42,8 +45,8 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth, task.config.hidden_size)
-    num_joints = len(joint_names)
+    carry_shape = (task.config.depth, task.config.hidden_size) # (3, 128) hiddens
+    num_joints = len(joint_names) # 20, joints outputs
 
     @jax.jit
     def init_fn() -> Array:
@@ -54,15 +57,19 @@ def main() -> None:
         joint_angles: Array,
         joint_angular_velocities: Array,
         projected_gravity: Array,
+        command: Array,
         accelerometer: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        print(command)
+        print(command.shape)
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
                 projected_gravity,
+                command,
                 accelerometer,
                 gyroscope,
             ],
@@ -80,6 +87,7 @@ def main() -> None:
     step_onnx = export_fn(
         model=step_fn,
         num_joints=num_joints,
+        num_commands=NUM_COMMANDS_MODEL,
         carry_shape=carry_shape,
     )
 
@@ -87,6 +95,7 @@ def main() -> None:
         init_fn=init_onnx,
         step_fn=step_onnx,
         joint_names=joint_names,
+        num_commands=NUM_COMMANDS_MODEL,
         carry_shape=carry_shape,
     )
 
