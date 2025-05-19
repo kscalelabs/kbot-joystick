@@ -354,21 +354,22 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the angular velocity."""
+    """Reward for tracking the heading using sin/cos error terms."""
 
     error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="sensor_observation_base_site_angvel")
     command_name: str = attrs.field(default="angular_velocity_command")
-    norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        if self.angvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
-
-        command = trajectory.command[self.command_name]
-        ang_vel_error = jnp.square(command.flatten() - trajectory.obs[self.angvel_obs_name][..., 2])
-        reward_value = jnp.exp(-ang_vel_error / self.error_scale)
-
+        # Get sin and cos of error from command
+        sin_error = trajectory.command[self.command_name][..., 2]
+        cos_error = trajectory.command[self.command_name][..., 3]
+        
+        # Error is 2 - 2*cos(error) which is a nice smooth error metric for angles
+        # When error is 0: cos=1, sin=0 -> error=0
+        # When error is pi: cos=-1, sin=0 -> error=4
+        error = 2.0 - 2.0 * cos_error
+        
+        reward_value = jnp.exp(-error / self.error_scale)
         return reward_value
 
 
@@ -407,7 +408,6 @@ class FeetPositionObservation(ksim.Observation):
             [0.0, 0.0, self.floor_threshold]
         )
         return jnp.concatenate([fl, fr], axis=-1)
-
 
 @attrs.define(kw_only=True)
 class AngularVelocityCommandMarker(ksim.vis.Marker):
@@ -491,27 +491,60 @@ class LinearVelocityCommandMarker(ksim.vis.Marker):
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(ksim.Command):
-    """Command to turn the robot."""
+    """Command to turn the robot.
+    
+    Outputs a 4D vector containing:
+    - ang_vel_command: The commanded angular velocity
+    - heading_cmd: The commanded heading (integrated from ang_vel)
+    - sin(error): Sine of heading error (robot frame)
+    - cos(error): Cosine of heading error (robot frame)
+    """
 
     scale: float = attrs.field()
+    ctrl_dt: float = attrs.field()
     zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
     min_magnitude: float = attrs.field(default=0.01)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        """Returns (1,) array with angular velocity."""
+        """Returns (4,) array with [ang_vel_cmd, heading_cmd, sin(error), cos(error)]."""
         rng_a, rng_b = jax.random.split(rng)
-        cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(cmd) < self.min_magnitude)
-        return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
+        ang_vel_cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(ang_vel_cmd) < self.min_magnitude)
+        ang_vel_cmd = jnp.where(zero_mask, jnp.zeros_like(ang_vel_cmd), ang_vel_cmd)
+        
+        # Initial heading command is 0, and since we're starting, error is 0 so sin=0, cos=1
+        return jnp.array([ang_vel_cmd[0], 0.0, 0.0, 1.0])
 
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        
+        # Extract previous values
+        prev_ang_vel = prev_command[0]
+        prev_heading_cmd = prev_command[1]
+        
+        # Get current robot heading from quat
+        quat = physics_data.qpos[-4:]  # assuming quat is last 4 elements
+        heading = jnp.arctan2(
+            2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
+            1.0 - 2.0 * (quat[2] * quat[2] + quat[3] * quat[3])
+        )
+        
+        # Generate new command if switching
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
+        ang_vel_cmd = jnp.where(switch_mask, new_commands[0], prev_ang_vel)
+        
+        # Update commanded heading by integrating angular velocity
+        heading_cmd = prev_heading_cmd + prev_ang_vel * self.ctrl_dt
+        
+        # Compute heading error in robot frame
+        error = heading_cmd - heading
+        
+        # Return [ang_vel_cmd, heading_cmd, sin(error), cos(error)]
+        return jnp.array([ang_vel_cmd, heading_cmd, jnp.sin(error), jnp.cos(error)])
 
     def get_markers(self) -> Collection[ksim.vis.Marker]:
         return [AngularVelocityCommandMarker.get(self.command_name)]
@@ -812,7 +845,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
-            # TimestepPhaseObservation(),
             ksim.JointPositionObservation(noise=math.radians(2)),
             ksim.JointVelocityObservation(noise=math.radians(10)),
             ksim.ActuatorForceObservation(),
@@ -880,6 +912,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 zero_prob=0.9,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
+                ctrl_dt=self.config.ctrl_dt,
             ),
         ]
 
@@ -931,15 +964,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> Model:
         num_joints = len(ZEROS)
 
-        # timestep phase + joint pos / vel + proj_grav
-        # num_actor_obs = 4 + num_joints * 2 + 3
+        #  joint pos / vel + proj_grav
         num_actor_obs = num_joints * 2 + 3
 
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        # num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
-        num_commands = 2 + 1  # lin vel + ang vel
+        num_commands = 2 + 4  # lin vel + ang vel
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
