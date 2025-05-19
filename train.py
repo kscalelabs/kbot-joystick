@@ -247,7 +247,7 @@ class FeetAirtimeReward(ksim.Reward):
         td_l = jnp.roll(touchdown(left_in), shift=-1).at[-1].set(0)
         td_r = jnp.roll(touchdown(right_in), shift=-1).at[-1].set(0)
 
-        swing_reward = (left_air - 0.4) * td_l.astype(jnp.float32) + (right_air - 0.4) * td_r.astype(jnp.float32)
+        swing_reward = (left_air - self.touchdown_penalty) * td_l.astype(jnp.float32) + (right_air - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
         # standing mask
         stand = (jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3) & (
@@ -502,7 +502,7 @@ class AngularVelocityCommand(ksim.Command):
         """Returns (1,) array with angular velocity."""
         rng_a, rng_b = jax.random.split(rng)
         cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob) or jnp.abs(cmd) < self.min_magnitude
+        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(cmd) < self.min_magnitude)
         return jnp.where(zero_mask, jnp.zeros_like(cmd), cmd)
 
     def __call__(
@@ -541,8 +541,8 @@ class LinearVelocityCommand(ksim.Command):
         (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
         x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
         y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jax.random.bernoulli(rng_zero_x, self.x_zero_prob) or jnp.abs(x) < self.min_magnitude # don't like small commands,
-        y_zero_mask = jax.random.bernoulli(rng_zero_y, self.y_zero_prob) or jnp.abs(y) < self.min_magnitude
+        x_zero_mask = jnp.logical_or(jax.random.bernoulli(rng_zero_x, self.x_zero_prob), jnp.abs(x) < self.min_magnitude)  # don't like small commands
+        y_zero_mask = jnp.logical_or(jax.random.bernoulli(rng_zero_y, self.y_zero_prob), jnp.abs(y) < self.min_magnitude)
         return jnp.concatenate(
             [
                 jnp.where(x_zero_mask, 0.0, x),
@@ -881,10 +881,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
             ),
-            # GaitFrequencyCommand(
-            #     gait_freq_lower=self.config.gait_freq_range[0],
-            #     gait_freq_upper=self.config.gait_freq_range[1],
-            # ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -901,7 +897,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=False), # TODO this should be orientation
+            # ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=False), # TODO this should be orientation
             # ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True), # NOTE seems redundant with linear velocity tracking reward
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1), # TODO best to have this in joint space vs pos space. looks like it is.
@@ -912,7 +908,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             # ),
             SingleFootContactReward(scale=0.3),
-            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.5),
+            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -995,7 +991,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         obs = [
-            # timestep_phase_4,  # 4
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
@@ -1027,7 +1022,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
-        # gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         # privileged obs
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -1044,7 +1038,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs_n = jnp.concatenate(
             [
-                # timestep_phase_4,  # 4
                 joint_pos_n,
                 joint_vel_n / 10.0,
                 com_inertia_n,
@@ -1061,7 +1054,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 feet_position_6,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
-                # gait_freq_cmd_1,
             ],
             axis=-1,
         )
