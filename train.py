@@ -250,6 +250,7 @@ class SingleFootContactReward(ksim.Reward):
 
         return reward
 
+
 @attrs.define(frozen=True, kw_only=True)
 class AlternatingSingleFootReward(ksim.Reward):
     """Alternating single-support.
@@ -272,30 +273,29 @@ class AlternatingSingleFootReward(ksim.Reward):
         left = jnp.any(contact[..., :2] > 0.5, axis=-1)
         right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
 
-        left_only = jnp.logical_and(left,  jnp.logical_not(right))
+        left_only = jnp.logical_and(left, jnp.logical_not(right))
         right_only = jnp.logical_and(right, jnp.logical_not(left))
 
-        side = jnp.where(left_only,  1,
-               jnp.where(right_only, -1, 0)).astype(jnp.int8)
+        side = jnp.where(left_only, 1, jnp.where(right_only, -1, 0)).astype(jnp.int8)
 
         k = int(self.window_size / self.ctrl_dt)
         win = side[..., -k:]
 
-        has_L = jnp.any(win ==  1, axis=-1)
-        has_R = jnp.any(win == -1, axis=-1)
+        has_l = jnp.any(win == 1, axis=-1)
+        has_r = jnp.any(win == -1, axis=-1)
         diff = jnp.abs(win[..., 1:] - win[..., :-1])
         switched = jnp.any(diff == 2, axis=-1)
 
-        alternating = has_L & has_R & switched
+        alternating = has_l & has_r & switched
 
         v_cmd = traj.command[self.linear_velocity_cmd_name]
         w_cmd = traj.command[self.angular_velocity_cmd_name]
-        cmd_mag = jnp.linalg.norm(jnp.concatenate([v_cmd, w_cmd], axis=-1),
-                                  axis=-1)
+        cmd_mag = jnp.linalg.norm(jnp.concatenate([v_cmd, w_cmd], axis=-1), axis=-1)
         standing = cmd_mag <= self.stand_still_threshold
 
         reward = jnp.where(standing | alternating, 1.0, 0.0)
         return reward * self.scale
+
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.Reward):
@@ -1020,7 +1020,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            # ksim.StayAliveReward(scale=1.0),
+            ksim.StayAliveReward(scale=10.0),
             LinearVelocityTrackingReward(
                 scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
@@ -1042,7 +1042,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=0.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
