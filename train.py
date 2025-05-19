@@ -49,6 +49,12 @@ ZEROS: list[tuple[str, float, float]] = [
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Training parameters.
+    scene: str = xax.field(
+        value="smooth",
+        help="The scene to use for the task.",
+    )
+
     # Model parameters.
     hidden_size: int = xax.field(
         value=128,
@@ -546,7 +552,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, self.config.scene)
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot"))
