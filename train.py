@@ -354,23 +354,61 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class AngularVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the heading using sin/cos error terms."""
+    """Reward for tracking the heading using quaternion-based error computation."""
 
     error_scale: float = attrs.field(default=0.25)
     command_name: str = attrs.field(default="angular_velocity_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # Get sin and cos of error from command
-        sin_error = trajectory.command[self.command_name][..., 2]
-        cos_error = trajectory.command[self.command_name][..., 3]
+        # Get commanded heading and make pure yaw quaternion [cos(rz/2), 0, 0, sin(rz/2)]
+        rz = trajectory.command[self.command_name][..., 1]  # shape: (batch,)
+        target_quat = jnp.stack([jnp.cos(rz/2), jnp.zeros_like(rz), jnp.zeros_like(rz), jnp.sin(rz/2)], axis=-1)  # shape: (batch, 4)
         
-        # Error is 2 - 2*cos(error) which is a nice smooth error metric for angles
-        # When error is 0: cos=1, sin=0 -> error=0
-        # When error is pi: cos=-1, sin=0 -> error=4
-        error = 2.0 - 2.0 * cos_error
+        # Get base quaternion (first body)
+        current_quat = trajectory.xquat[..., 1, :4]  # shape: (batch, 4). base is 1st element not 0th?
         
-        reward_value = jnp.exp(-error / self.error_scale)
-        return reward_value
+        # q_diff = q_target * q_current^-1
+        # For quaternion multiplication [w1,x1,y1,z1] * [w2,x2,y2,z2]:
+        q_diff = jnp.stack([
+            target_quat[..., 0]*current_quat[..., 0] + target_quat[..., 1]*current_quat[..., 1] + 
+            target_quat[..., 2]*current_quat[..., 2] + target_quat[..., 3]*current_quat[..., 3],
+            
+            -target_quat[..., 0]*current_quat[..., 1] + target_quat[..., 1]*current_quat[..., 0] + 
+            target_quat[..., 2]*current_quat[..., 3] - target_quat[..., 3]*current_quat[..., 2],
+            
+            -target_quat[..., 0]*current_quat[..., 2] - target_quat[..., 1]*current_quat[..., 3] + 
+            target_quat[..., 2]*current_quat[..., 0] + target_quat[..., 3]*current_quat[..., 1],
+            
+            -target_quat[..., 0]*current_quat[..., 3] + target_quat[..., 1]*current_quat[..., 2] - 
+            target_quat[..., 2]*current_quat[..., 1] + target_quat[..., 3]*current_quat[..., 0]
+        ], axis=-1)
+        
+        # Get angle from quaternion difference
+        error = 2.0 * jnp.arctan2(q_diff[..., 3], q_diff[..., 0])
+        return jnp.exp(-jnp.abs(error) / self.error_scale)
+
+
+@attrs.define(frozen=True)
+class UprightReward(ksim.Reward):
+    """Reward for staying upright using exponential error.
+    
+    Computes how well the robot's local z-axis aligns with global z-axis,
+    only caring about the z component (dot product with [0,0,1]).
+    Uses exp(-error) to be more stringent about staying upright.
+    """
+    
+    error_scale: float = attrs.field(default=0.25)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        local_z = jnp.array([0.0, 0.0, 1.0])
+        quat = trajectory.qpos[..., 3:7]  # Base quaternion
+        global_z = xax.rotate_vector_by_quat(local_z, quat)
+        
+        # Error is just how far z component is from 1.0 (should point straight up)
+        # This ignores xy components entirely, only caring about vertical alignment
+        z_error = 1.0 - global_z[..., 2]  # Error when not pointing up
+        
+        return jnp.exp(-z_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -526,12 +564,16 @@ class AngularVelocityCommand(ksim.Command):
         prev_ang_vel = prev_command[0]
         prev_heading_cmd = prev_command[1]
         
-        # Get current robot heading from quat
-        quat = physics_data.qpos[-4:]  # assuming quat is last 4 elements
-        heading = jnp.arctan2(
-            2.0 * (quat[0] * quat[3] + quat[1] * quat[2]),
-            1.0 - 2.0 * (quat[2] * quat[2] + quat[3] * quat[3])
-        )
+        # Get current robot heading from quat. this should be torso quat in world frame
+        quat = physics_data.qpos[3:7]
+        # Extract current heading from quaternion
+        # For a quaternion representing [roll, pitch, yaw], we want just the yaw component
+        # We can get this by zeroing out roll/pitch and renormalizing
+        # This gives us the closest pure-yaw quaternion to our current orientation
+        w, x, y, z = quat[0], quat[1], quat[2], quat[3]
+        # Project onto yaw-only rotation (zeroing x,y components)
+        yaw_w = jnp.sqrt(w*w + z*z)
+        current_yaw_quat = jnp.array([w/yaw_w, 0.0, 0.0, z/yaw_w])
         
         # Generate new command if switching
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
@@ -540,8 +582,24 @@ class AngularVelocityCommand(ksim.Command):
         # Update commanded heading by integrating angular velocity
         heading_cmd = prev_heading_cmd + prev_ang_vel * self.ctrl_dt
         
-        # Compute heading error in robot frame
-        error = heading_cmd - heading
+        # Convert heading command to quaternion
+        cmd_quat = jnp.array([jnp.cos(heading_cmd/2), 0.0, 0.0, jnp.sin(heading_cmd/2)])
+        
+        # Compute error quaternion in world frame: q_error = q_target * q_current^-1
+        # For pure yaw quaternions, the inverse is just [w, 0, 0, -z]
+        current_yaw_quat_inv = jnp.array([current_yaw_quat[0], 0.0, 0.0, -current_yaw_quat[3]])
+        
+        # Multiply cmd_quat * current_yaw_quat_inv
+        error_quat = jnp.array([
+            cmd_quat[0]*current_yaw_quat_inv[0] - cmd_quat[3]*current_yaw_quat_inv[3],
+            0.0,
+            0.0,
+            cmd_quat[0]*current_yaw_quat_inv[3] + cmd_quat[3]*current_yaw_quat_inv[0]
+        ])
+        
+        # Extract error angle from error quaternion
+        # For a pure yaw rotation, we can use atan2(z, w) * 2
+        error = jnp.arctan2(error_quat[3], error_quat[0]) * 2.0
         
         # Return [ang_vel_cmd, heading_cmd, sin(error), cos(error)]
         return jnp.array([ang_vel_cmd, heading_cmd, jnp.sin(error), jnp.cos(error)])
@@ -921,8 +979,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             # ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
-            AngularVelocityTrackingReward(scale=1.0, error_scale=0.1),
-            ksim.UprightReward(scale=0.3),
+            AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
+            UprightReward(scale=0.3),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
