@@ -908,17 +908,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_noise=math.radians(5),
+            action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.1, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.01, scale_upper=2.0
             ),
         ]
 
@@ -946,7 +948,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             TimestepPhaseObservation(),
             ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(10)),
+            ksim.JointVelocityObservation(noise=math.radians(30)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -961,17 +963,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=math.radians(1),
-            ),
-            ksim.SensorObservation.create(
-                physics_model=physics_model,
-                sensor_name="imu_acc",
                 noise=0.5,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
+                sensor_name="imu_acc",
+                noise=1.0,
+            ),
+            ksim.SensorObservation.create(
+                physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=math.radians(120),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -1035,7 +1037,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.15, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True),
@@ -1048,7 +1050,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            AlternatingSingleFootReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
+            AlternatingSingleFootReward(scale=2.0, stand_still_threshold=self.config.stand_still_threshold),
             # SingleFootContactReward(scale=0.3, stand_still_threshold=self.config.stand_still_threshold),
             FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.5),
         ]
