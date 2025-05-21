@@ -32,15 +32,15 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_shoulder_yaw_02", 0.0, 1.0),
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
-    ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
+    ("dof_right_hip_pitch_04", math.radians(-20.0), 0.25),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
-    ("dof_right_knee_04", math.radians(-50.0), 0.01),
+    ("dof_right_knee_04", math.radians(-50.0), 0.1),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
-    ("dof_left_hip_pitch_04", math.radians(20.0), 0.01),
+    ("dof_left_hip_pitch_04", math.radians(20.0), 0.25),
     ("dof_left_hip_roll_03", math.radians(0.0), 2.0),
     ("dof_left_hip_yaw_03", 0.0, 2.0),
-    ("dof_left_knee_04", math.radians(50.0), 0.01),
+    ("dof_left_knee_04", math.radians(50.0), 0.1),
     ("dof_left_ankle_02", math.radians(-30.0), 1.0),
 ]
 
@@ -1022,14 +1022,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=10.0),
             LinearVelocityTrackingReward(
-                scale=1.0,
+                scale=3.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
-                scale=1.0,
+                scale=2.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
-            ksim.UprightReward(scale=0.3),
+            ksim.UprightReward(scale=0.8),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
@@ -1037,12 +1037,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.15, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            FeetPhaseReward(scale=0.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
