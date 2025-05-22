@@ -266,7 +266,7 @@ class AlternatingSingleFootReward(ksim.Reward):
     angular_velocity_cmd_name: str = "angular_velocity_command"
     ctrl_dt: float = 0.02
     stand_still_threshold: float = 0.01
-    window_size: float = 0.2
+    window_size: float = 0.8
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
