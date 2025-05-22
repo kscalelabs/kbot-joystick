@@ -81,7 +81,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=30.0,
+        value=10.0,
         help="Increase the curriculum level when the mean trajectory length is above this threshold.",
     )
     decrease_threshold: float = xax.field(
@@ -245,6 +245,22 @@ class StraightLegPenalty(JointPositionPenalty):
                 "dof_right_hip_roll_03",
                 "dof_right_hip_yaw_03",
             ],
+            physics_model=physics_model,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+class AnkleKneePenalty(JointPositionPenalty):
+    @classmethod
+    def create_penalty(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        return cls.create_from_names(
+            names=["dof_left_knee_04", "dof_left_ankle_02", "dof_right_knee_04", "dof_right_ankle_02"],
             physics_model=physics_model,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
@@ -595,12 +611,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 z_angular_force=0.7,
                 interval_range=(2.0, 4.0),
             ),
+            ksim.JumpEvent(
+                jump_height_range=(0.0, 0.3),
+                interval_range=(2.0, 4.0),
+            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
             ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=math.radians(45)),
             ksim.RandomJointVelocityReset(),
+            ksim.RandomHeightReset(range=(0.0, 0.3)),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -622,7 +643,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.5,
+                noise=0.3,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -671,25 +692,28 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 backward_speed=0.5,
                 strafe_speed=0.5,
                 rotation_speed=math.radians(30),
-                ang_vel_penalty_scale=0.3,
-                lin_vel_penalty_scale=0.3,
-                scale=1.5,
+                ang_vel_penalty_scale=0.8,
+                lin_vel_penalty_scale=0.5,
+                scale=2.5,
                 in_robot_frame=True,
                 command_name="switching_joystick_command",
             ),
-            ksim.UprightReward(scale=0.5),
+            ksim.UprightReward(scale=2.5),
+            ksim.BaseHeightReward(height_target=1.1, scale=1.0),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
-            ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.JointJerkPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.LinkAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
-            ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=True),
-            ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True),
+            ksim.LinkJerkPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.05, scale_by_curriculum=True),
+            ksim.LinearVelocityPenalty(index=("z",), scale=-0.05, scale_by_curriculum=True),
+            ksim.CtrlPenalty(scale=-0.1, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
+            AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             FeetPhaseReward(scale=1.0, max_foot_height=0.18),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
@@ -939,7 +963,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
+            action_latency_range=(0.003, 0.005),  # Simulate 3-5ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
