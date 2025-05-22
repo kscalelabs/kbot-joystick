@@ -4,7 +4,7 @@ import asyncio
 import functools
 import math
 from dataclasses import dataclass
-from typing import Collection, Literal, Self
+from typing import Collection, Self
 
 import attrs
 import distrax
@@ -33,14 +33,14 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
     ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
-    ("dof_right_knee_04", math.radians(-50.0), 0.01),
+    ("dof_right_knee_04", math.radians(-50.0), 0.2),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
     ("dof_left_hip_pitch_04", math.radians(20.0), 0.01),
     ("dof_left_hip_roll_03", math.radians(0.0), 2.0),
     ("dof_left_hip_yaw_03", 0.0, 2.0),
-    ("dof_left_knee_04", math.radians(50.0), 0.01),
+    ("dof_left_knee_04", math.radians(50.0), 0.2),
     ("dof_left_ankle_02", math.radians(-30.0), 1.0),
 ]
 
@@ -258,6 +258,21 @@ class StraightLegPenalty(JointPositionPenalty):
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
+    
+class AnkleKneePenalty(JointPositionPenalty):
+    @classmethod
+    def create_penalty(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        return cls.create_from_names(
+            names=["dof_left_knee_04", "dof_left_ankle_02", "dof_right_knee_04", "dof_right_ankle_02"],
+            physics_model=physics_model,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -305,24 +320,6 @@ class AngularVelocityTrackingReward(ksim.Reward):
         command_norm = jnp.linalg.norm(command, axis=-1)
         reward_value *= command_norm > self.stand_still_threshold
 
-        return reward_value
-
-
-@attrs.define(frozen=True, kw_only=True)
-class TargetHeightReward(ksim.Reward):
-    """Reward for reaching a target height."""
-
-    target_height: float = attrs.field(default=1.0)
-    norm: xax.NormType = attrs.field(default="l1")
-    temp: float = attrs.field(default=1.0)
-    monotonic_fn: Literal["exp", "inv"] = attrs.field(default="inv")
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos
-        error = qpos[..., 2] - self.target_height
-        reward_value = ksim.norm_to_reward(
-            xax.get_norm(error, self.norm), temp=self.temp, monotonic_fn=self.monotonic_fn
-        )
         return reward_value
 
 
@@ -431,6 +428,7 @@ class AngularVelocityCommandMarker(ksim.vis.Marker):
             geom=mujoco.mjtGeom.mjGEOM_SPHERE,
             scale=(0.0, 0.0, 0.0),
             height=height,
+            track_rotation=True,
         )
 
 
@@ -464,7 +462,7 @@ class LinearVelocityCommandMarker(ksim.vis.Marker):
         cls,
         command_name: str,
         *,
-        arrow_scale: float = 0.25,
+        arrow_scale: float = 0.75,
         height: float = 0.5,
     ) -> Self:
         return cls(
@@ -474,6 +472,7 @@ class LinearVelocityCommandMarker(ksim.vis.Marker):
             scale=(0.0, 0.0, 0.0),
             arrow_scale=arrow_scale,
             height=height,
+            track_rotation=True,
         )
 
 
@@ -768,11 +767,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.05),
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.1, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.01, scale_upper=2.0
             ),
         ]
 
@@ -782,7 +781,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_force=1.0,
                 y_force=1.0,
                 z_force=0.3,
-                force_range=(0.3, 1.5),
+                force_range=(0.3, 1.0),
                 x_angular_force=0.7,
                 y_angular_force=0.7,
                 z_angular_force=0.7,
@@ -882,7 +881,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
-                scale=1.0,
+                scale=0.5,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             ksim.UprightReward(scale=0.5),
@@ -896,9 +895,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True),
             # Bespoke rewards.
-            TargetHeightReward(target_height=1.0, scale=0.5),
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
+            AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
@@ -1145,7 +1144,7 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
-            num_envs=2048,
+            num_envs=4096,
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
@@ -1156,7 +1155,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
+            action_latency_range=(0.001, 0.008),  # Simulate 3-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
