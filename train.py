@@ -1137,7 +1137,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        # timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
@@ -1147,14 +1146,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ang_vel_cmd = commands["angular_velocity_command"]
         base_height_cmd = commands["base_height_command"]
 
+        # Manually normalize the command inputs to approx [-10, 10]
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
             ang_vel_cmd,  # 4
-            base_height_cmd,  # 1
-            # (base_height_cmd-0.85) * 1000,  # 1
+            (base_height_cmd-0.85) * 67,  # 1
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1174,7 +1173,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[Array, Array]:
-        # timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
@@ -1195,6 +1193,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         base_ang_vel_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
 
+        # Manually normalize the command inputs to approx [-10, 10]
         obs_n = jnp.concatenate(
             [   
                 # actor obs:
@@ -1203,14 +1202,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 proj_grav_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
-                base_height_cmd,
-                # (base_height_cmd-0.85) * 1000,
+                (base_height_cmd-0.85) * 67,
+                imu_acc_3, # m/s^2
+                imu_gyro_3, # rad/s
                 # privileged obs:
                 com_inertia_n,
                 com_vel_n,
-                imu_acc_3,
-                imu_gyro_3,
-                actuator_force_n / 100.0,
+                actuator_force_n / 4.0,
                 base_position_3,
                 base_orientation_4,
                 base_lin_vel_3,
