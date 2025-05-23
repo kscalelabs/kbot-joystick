@@ -337,7 +337,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel") # TODO is this global or local frame
+    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
 
@@ -345,8 +345,13 @@ class LinearVelocityTrackingReward(ksim.Reward):
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
 
+        # Get global frame velocity and transform to robot frame
+        global_vel = trajectory.obs[self.linvel_obs_name]
+        local_vel = xax.rotate_vector_by_quat(global_vel, trajectory.qpos[..., 3:7], inverse=True)
+        
+        # Compare command (already in local frame) with local velocity
         command = trajectory.command[self.command_name]
-        lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
+        lin_vel_error = xax.get_norm(command - local_vel[..., :2], self.norm).sum(axis=-1)
         reward_value = jnp.exp(-lin_vel_error / self.error_scale)
 
         return reward_value
@@ -411,6 +416,30 @@ class UprightReward(ksim.Reward):
         return jnp.exp(-z_error / self.error_scale)
 
 
+@attrs.define(frozen=True)
+class BaseHeightReward(ksim.Reward):
+    """Reward for keeping the base height at the commanded height.
+    
+    Uses exponential error function to reward height tracking:
+    reward = exp(-|current_height - commanded_height| / error_scale)
+    """
+
+    error_scale: float = attrs.field(default=0.1)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        # Get current base height (z coordinate)
+        current_height = trajectory.qpos[..., 2] # TODO confirm
+        
+        # Get commanded height
+        commanded_height = trajectory.command["base_height_command"][..., 0]
+        
+        # Compute error and reward
+        height_error = jnp.abs(current_height - commanded_height)
+        reward = jnp.exp(-height_error / self.error_scale)
+        
+        return reward
+
+
 @attrs.define(frozen=True, kw_only=True)
 class FeetContactObservation(ksim.FeetContactObservation):
     """Flattened (4,) contact flags of both feet."""
@@ -424,6 +453,7 @@ class FeetPositionObservation(ksim.Observation):
     foot_left_idx: int
     foot_right_idx: int
     floor_threshold: float = 0.0
+    in_robot_frame: bool = True
 
     @classmethod
     def create(
@@ -433,10 +463,11 @@ class FeetPositionObservation(ksim.Observation):
         foot_left_site_name: str,
         foot_right_site_name: str,
         floor_threshold: float = 0.0,
+        in_robot_frame: bool = True,
     ) -> Self:
         fl = ksim.get_site_data_idx_from_name(physics_model, foot_left_site_name)
         fr = ksim.get_site_data_idx_from_name(physics_model, foot_right_site_name)
-        return cls(foot_left_idx=fl, foot_right_idx=fr, floor_threshold=floor_threshold)
+        return cls(foot_left_idx=fl, foot_right_idx=fr, floor_threshold=floor_threshold, in_robot_frame=in_robot_frame)
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         fl = ksim.get_site_pose(state.physics_state.data, self.foot_left_idx)[0] + jnp.array(
@@ -445,6 +476,13 @@ class FeetPositionObservation(ksim.Observation):
         fr = ksim.get_site_pose(state.physics_state.data, self.foot_right_idx)[0] + jnp.array(
             [0.0, 0.0, self.floor_threshold]
         )
+        
+        if self.in_robot_frame:
+            # Transform foot positions to robot frame
+            base_quat = state.physics_state.data.qpos[3:7]  # Base quaternion
+            fl = xax.rotate_vector_by_quat(fl, base_quat, inverse=True)
+            fr = xax.rotate_vector_by_quat(fr, base_quat, inverse=True)
+        
         return jnp.concatenate([fl, fr], axis=-1)
 
 @attrs.define(kw_only=True)
@@ -564,17 +602,6 @@ class AngularVelocityCommand(ksim.Command):
         prev_ang_vel = prev_command[0]
         prev_heading_cmd = prev_command[1]
         
-        # Get current robot heading from quat. this should be torso quat in world frame
-        quat = physics_data.qpos[3:7]
-        # Extract current heading from quaternion
-        # For a quaternion representing [roll, pitch, yaw], we want just the yaw component
-        # We can get this by zeroing out roll/pitch and renormalizing
-        # This gives us the closest pure-yaw quaternion to our current orientation
-        w, x, y, z = quat[0], quat[1], quat[2], quat[3]
-        # Project onto yaw-only rotation (zeroing x,y components)
-        yaw_w = jnp.sqrt(w*w + z*z)
-        current_yaw_quat = jnp.array([w/yaw_w, 0.0, 0.0, z/yaw_w])
-        
         # Generate new command if switching
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
         ang_vel_cmd = jnp.where(switch_mask, new_commands[0], prev_ang_vel)
@@ -582,27 +609,21 @@ class AngularVelocityCommand(ksim.Command):
         # Update commanded heading by integrating angular velocity
         heading_cmd = prev_heading_cmd + prev_ang_vel * self.ctrl_dt
         
-        # Convert heading command to quaternion
-        cmd_quat = jnp.array([jnp.cos(heading_cmd/2), 0.0, 0.0, jnp.sin(heading_cmd/2)])
+        # Create unit vector pointing in commanded direction
+        cmd_dir = jnp.array([jnp.cos(heading_cmd), jnp.sin(heading_cmd), 0.0])
         
-        # Compute error quaternion in world frame: q_error = q_target * q_current^-1
-        # For pure yaw quaternions, the inverse is just [w, 0, 0, -z]
-        current_yaw_quat_inv = jnp.array([current_yaw_quat[0], 0.0, 0.0, -current_yaw_quat[3]])
+        # Get current robot orientation and rotate command vector to robot frame
+        quat = physics_data.qpos[3:7]  # Base quaternion
+        # Rotate command vector into robot frame to get error
+        cmd_in_robot_frame = xax.rotate_vector_by_quat(cmd_dir, quat, inverse=True)
         
-        # Multiply cmd_quat * current_yaw_quat_inv
-        error_quat = jnp.array([
-            cmd_quat[0]*current_yaw_quat_inv[0] - cmd_quat[3]*current_yaw_quat_inv[3],
-            0.0,
-            0.0,
-            cmd_quat[0]*current_yaw_quat_inv[3] + cmd_quat[3]*current_yaw_quat_inv[0]
-        ])
-        
-        # Extract error angle from error quaternion
-        # For a pure yaw rotation, we can use atan2(z, w) * 2
-        error = jnp.arctan2(error_quat[3], error_quat[0]) * 2.0
+        # Extract error components - in robot frame, forward is [1,0,0]
+        # so error components are directly the y (sin) and x (cos) components
+        sin_error = cmd_in_robot_frame[1]  # y component is sin
+        cos_error = cmd_in_robot_frame[0]  # x component is cos
         
         # Return [ang_vel_cmd, heading_cmd, sin(error), cos(error)]
-        return jnp.array([ang_vel_cmd, heading_cmd, jnp.sin(error), jnp.cos(error)])
+        return jnp.array([ang_vel_cmd, heading_cmd, sin_error, cos_error])
 
     def get_markers(self) -> Collection[ksim.vis.Marker]:
         return [AngularVelocityCommandMarker.get(self.command_name)]
@@ -652,6 +673,32 @@ class LinearVelocityCommand(ksim.Command):
     def get_markers(self) -> Collection[ksim.vis.Marker]:
         return [LinearVelocityCommandMarker.get(self.command_name)]
 
+
+@attrs.define(frozen=True)
+class BaseHeightCommand(ksim.Command):
+    """Command to set the base height.
+    
+    Samples heights uniformly between min_height and max_height with a configurable
+    switch probability. Otherwise keeps the previous height.
+    """
+
+    min_height: float = attrs.field()
+    max_height: float = attrs.field()
+    switch_prob: float = attrs.field(default=0.0)
+    ctrl_dt: float = attrs.field()
+
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        height = jax.random.uniform(rng_b, (1,), minval=self.min_height, maxval=self.max_height)
+        return height
+
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_height = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_height, prev_command)
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -952,24 +999,46 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_left_site_name="left_foot",
                 foot_right_site_name="right_foot",
                 floor_threshold=0.0,
+                in_robot_frame=True,
             ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
+            # LinearVelocityCommand(
+            #     x_range=(-0.3, 0.8),
+            #     y_range=(-0.3, 0.3),
+            #     x_zero_prob=0.5,
+            #     y_zero_prob=0.5,
+            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            #     min_magnitude=self.config.stand_still_threshold,
+            # ),
             LinearVelocityCommand(
                 x_range=(-0.3, 0.8),
                 y_range=(-0.3, 0.3),
-                x_zero_prob=0.5,
-                y_zero_prob=0.5,
+                x_zero_prob=1,
+                y_zero_prob=1,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
             ),
+            # AngularVelocityCommand(
+            #     scale=0.5,
+            #     zero_prob=0.9,
+            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            #     min_magnitude=self.config.stand_still_threshold,
+            #     ctrl_dt=self.config.ctrl_dt,
+            # ),
             AngularVelocityCommand(
                 scale=0.5,
-                zero_prob=0.9,
+                zero_prob=1,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
+            BaseHeightCommand(
+                min_height=0.5,  # Minimum base height in meters
+                max_height=0.8,  # Maximum base height in meters
+                switch_prob=self.config.ctrl_dt / 5,  # Switch height every 5 seconds on average
                 ctrl_dt=self.config.ctrl_dt,
             ),
         ]
@@ -981,6 +1050,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
             AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
             UprightReward(scale=0.3),
+            BaseHeightReward(scale=0.3),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
@@ -998,8 +1068,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             #     scale=-0.03,
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             # ),
-            SingleFootContactReward(scale=0.3),
-            FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            # SingleFootContactReward(scale=0.3),
+            # FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -1241,7 +1311,7 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=8.0,
+            rollout_length_seconds=2.0, # temporarily putting this lower to go faster
             global_grad_clip=2.0,
             # Simulation parameters.
             dt=0.002,
