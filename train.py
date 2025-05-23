@@ -702,7 +702,7 @@ class BaseHeightCommand(ksim.Command):
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
-    input_proj: eqx.nn.Linear
+    input_proj: eqx.nn.Sequential
     rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.static_field()
@@ -735,9 +735,9 @@ class Actor(eqx.Module):
         key1, key2 = jax.random.split(input_proj_key)
         self.input_proj = eqx.nn.Sequential([
             eqx.nn.Linear(num_inputs, hidden_size, key=key1),
-            jax.nn.relu,
+            eqx.nn.Lambda(jax.nn.relu),
             eqx.nn.Linear(hidden_size, hidden_size, key=key2), 
-            jax.nn.relu
+            eqx.nn.Lambda(jax.nn.relu)
         ])
 
         # Create RNN layer
@@ -821,9 +821,9 @@ class Critic(eqx.Module):
         key1, key2 = jax.random.split(input_proj_key)
         self.input_proj = eqx.nn.Sequential([
             eqx.nn.Linear(num_inputs, hidden_size, key=key1),
-            jax.nn.relu,
-            eqx.nn.Linear(hidden_size, hidden_size, key=key2), 
-            jax.nn.relu
+            eqx.nn.Lambda(jax.nn.relu),
+            eqx.nn.Linear(hidden_size, hidden_size, key=key2),
+            eqx.nn.Lambda(jax.nn.relu)
         ])
 
         # Create RNN layer
@@ -1167,7 +1167,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
             ang_vel_cmd,  # 4
-            (base_height_cmd-0.85) * 1000,  # 1
+            base_height_cmd,  # 1
+            # (base_height_cmd-0.85) * 1000,  # 1
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1216,7 +1217,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 proj_grav_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
-                (base_height_cmd-0.85) * 1000,
+                base_height_cmd,
+                # (base_height_cmd-0.85) * 1000,
                 # privileged obs:
                 com_inertia_n,
                 com_vel_n,
