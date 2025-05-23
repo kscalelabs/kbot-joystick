@@ -1037,7 +1037,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BaseHeightCommand(
                 min_height=0.7,  # Minimum base height in meters
                 max_height=1.0,  # Maximum base height in meters
-                switch_prob=self.config.ctrl_dt / 5,  # Switch height every 5 seconds on average
+                switch_prob=self.config.ctrl_dt / 3,  # Switch height every 5 seconds on average
             ),
         ]
 
@@ -1048,7 +1048,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
             AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
             UprightReward(scale=0.3),
-            BaseHeightReward(scale=0.3),
+            BaseHeightReward(scale=0.5, error_scale=0.1),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
