@@ -424,7 +424,7 @@ class BaseHeightReward(ksim.Reward):
     reward = exp(-|current_height - commanded_height| / error_scale)
     """
 
-    error_scale: float = attrs.field(default=0.1)
+    error_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # Get current base height (z coordinate)
@@ -929,16 +929,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.3,
-                force_range=(0.2, 0.8),
-                x_angular_force=0.4,
-                y_angular_force=0.4,
-                z_angular_force=0.4,
-                interval_range=(4.0, 6.0),
-            ),
+            # ksim.PushEvent(
+            #     x_force=1.0,
+            #     y_force=1.0,
+            #     z_force=0.3,
+            #     force_range=(0.2, 0.8),
+            #     x_angular_force=0.4,
+            #     y_angular_force=0.4,
+            #     z_angular_force=0.4,
+            #     interval_range=(4.0, 6.0),
+            # ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -1035,8 +1035,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ctrl_dt=self.config.ctrl_dt,
             ),
             BaseHeightCommand(
-                min_height=0.5,  # Minimum base height in meters
-                max_height=0.8,  # Maximum base height in meters
+                min_height=0.7,  # Minimum base height in meters
+                max_height=1.0,  # Maximum base height in meters
                 switch_prob=self.config.ctrl_dt / 5,  # Switch height every 5 seconds on average
             ),
         ]
