@@ -1015,8 +1015,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityCommand(
                 x_range=(-0.3, 0.8),
                 y_range=(-0.3, 0.3),
-                x_zero_prob=1,
-                y_zero_prob=1,
+                x_zero_prob=1.0,
+                y_zero_prob=1.0,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
             ),
@@ -1029,7 +1029,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ),
             AngularVelocityCommand(
                 scale=0.5,
-                zero_prob=1,
+                zero_prob=1.0,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=self.config.stand_still_threshold,
                 ctrl_dt=self.config.ctrl_dt,
