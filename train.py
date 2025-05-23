@@ -1096,7 +1096,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        num_commands = 2 + 4  # lin vel + ang vel
+        num_commands = 2 + 4 + 1  # lin vel + ang vel + base height
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -1145,15 +1145,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
-        # gait_freq_cmd_1 = commands["gait_frequency_command"]
+        base_height_cmd = commands["base_height_command"]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
-            ang_vel_cmd,  # 1
-            # gait_freq_cmd_1,  # 1
+            ang_vel_cmd,  # 4
+            base_height_cmd,  # 1
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1177,12 +1177,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
-
-        # privileged obs
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        lin_vel_cmd_2 = commands["linear_velocity_command"]
+        ang_vel_cmd = commands["angular_velocity_command"]
+        base_height_cmd = commands["base_height_command"]
+
+        # privileged obs
         feet_contact_4 = observations["feet_contact_observation"]
         feet_position_6 = observations["feet_position_observation"]
         base_position_3 = observations["base_position_observation"]
@@ -1194,14 +1195,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         actuator_force_n = observations["actuator_force_observation"]
 
         obs_n = jnp.concatenate(
-            [
+            [   
+                # actor obs:
                 joint_pos_n,
-                joint_vel_n / 10.0,
+                joint_vel_n / 10.0, # TODO fix this
+                proj_grav_3,
+                lin_vel_cmd_2,
+                ang_vel_cmd,
+                base_height_cmd,
+                # privileged obs:
                 com_inertia_n,
                 com_vel_n,
                 imu_acc_3,
                 imu_gyro_3,
-                proj_grav_3,
                 actuator_force_n / 100.0,
                 base_position_3,
                 base_orientation_4,
@@ -1209,8 +1215,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_ang_vel_3,
                 feet_contact_4,
                 feet_position_6,
-                lin_vel_cmd_2,
-                ang_vel_cmd,
             ],
             axis=-1,
         )
