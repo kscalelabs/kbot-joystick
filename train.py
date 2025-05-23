@@ -1153,7 +1153,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
             ang_vel_cmd,  # 4
-            base_height_cmd,  # 1
+            (base_height_cmd-0.85) * 1000,  # 1
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1202,7 +1202,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 proj_grav_3,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
-                base_height_cmd,
+                (base_height_cmd-0.85) * 1000,
                 # privileged obs:
                 com_inertia_n,
                 com_vel_n,
