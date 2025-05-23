@@ -702,7 +702,7 @@ class BaseHeightCommand(ksim.Command):
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
-    input_proj: eqx.nn.Sequential
+    input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell, ...]
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.static_field()
@@ -727,18 +727,11 @@ class Actor(eqx.Module):
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
-        # self.input_proj = eqx.nn.Linear(
-        #     in_features=num_inputs,
-        #     out_features=hidden_size,
-        #     key=input_proj_key,
-        # )
-        key1, key2 = jax.random.split(input_proj_key)
-        self.input_proj = eqx.nn.Sequential([
-            eqx.nn.Linear(num_inputs, hidden_size, key=key1),
-            eqx.nn.Lambda(jax.nn.relu),
-            eqx.nn.Linear(hidden_size, hidden_size, key=key2), 
-            eqx.nn.Lambda(jax.nn.relu)
-        ])
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
+        )
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
@@ -813,18 +806,11 @@ class Critic(eqx.Module):
 
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
-        # self.input_proj = eqx.nn.Linear(
-        #     in_features=num_inputs,
-        #     out_features=hidden_size,
-        #     key=input_proj_key,
-        # )
-        key1, key2 = jax.random.split(input_proj_key)
-        self.input_proj = eqx.nn.Sequential([
-            eqx.nn.Linear(num_inputs, hidden_size, key=key1),
-            eqx.nn.Lambda(jax.nn.relu),
-            eqx.nn.Linear(hidden_size, hidden_size, key=key2),
-            eqx.nn.Lambda(jax.nn.relu)
-        ])
+        self.input_proj = eqx.nn.Linear(
+            in_features=num_inputs,
+            out_features=hidden_size,
+            key=input_proj_key,
+        )
 
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
