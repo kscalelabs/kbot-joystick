@@ -1048,7 +1048,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
             AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
             UprightReward(scale=0.3),
-            BaseHeightReward(scale=0.5, error_scale=0.1),
+            BaseHeightReward(scale=2.0, error_scale=0.05),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
