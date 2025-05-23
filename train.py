@@ -685,7 +685,6 @@ class BaseHeightCommand(ksim.Command):
     min_height: float = attrs.field()
     max_height: float = attrs.field()
     switch_prob: float = attrs.field(default=0.0)
-    ctrl_dt: float = attrs.field()
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b = jax.random.split(rng)
@@ -1039,7 +1038,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 min_height=0.5,  # Minimum base height in meters
                 max_height=0.8,  # Maximum base height in meters
                 switch_prob=self.config.ctrl_dt / 5,  # Switch height every 5 seconds on average
-                ctrl_dt=self.config.ctrl_dt,
             ),
         ]
 
