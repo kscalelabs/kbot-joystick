@@ -394,26 +394,26 @@ class AngularVelocityTrackingReward(ksim.Reward):
 
 
 @attrs.define(frozen=True)
-class UprightReward(ksim.Reward):
-    """Reward for staying upright using exponential error.
-    
-    Computes how well the robot's local z-axis aligns with global z-axis,
-    only caring about the z component (dot product with [0,0,1]).
-    Uses exp(-error) to be more stringent about staying upright.
-    """
-    
+class XYOrientationReward(ksim.Reward):
+    """Reward for tracking the xy base orientation using quaternion-based error computation."""
+
     error_scale: float = attrs.field(default=0.25)
+    command_name: str = attrs.field(default="xyorientation_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        local_z = jnp.array([0.0, 0.0, 1.0])
-        quat = trajectory.qpos[..., 3:7]  # Base quaternion
-        global_z = xax.rotate_vector_by_quat(local_z, quat)
-        
-        # Error is just how far z component is from 1.0 (should point straight up)
-        # This ignores xy components entirely, only caring about vertical alignment
-        z_error = 1.0 - global_z[..., 2]  # Error when not pointing up
-        
-        return jnp.exp(-z_error / self.error_scale)
+        euler_orientation = xax.quat_to_euler(trajectory.qpos[..., 3:7])
+        euler_orientation = euler_orientation.at[..., 2].set(0.0)  # ignore yaw
+        base_xy_quat = xax.euler_to_quat(euler_orientation)
+
+        commanded_euler = jnp.stack([
+            trajectory.command[self.command_name][..., 0],
+            trajectory.command[self.command_name][..., 1],
+            jnp.zeros_like(trajectory.command[self.command_name][..., 0])
+        ], axis=-1)
+        base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
+
+        quat_error = 1 - jnp.sum(base_xy_quat_cmd * base_xy_quat, axis=-1) ** 2
+        return jnp.exp(-quat_error / self.error_scale)
 
 
 @attrs.define(frozen=True)
@@ -698,6 +698,38 @@ class BaseHeightCommand(ksim.Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_height = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_height, prev_command)
+
+
+@attrs.define(frozen=True)
+class XYOrientationCommand(ksim.Command):
+    """Command to set base xy orientation. """
+
+    range: float = attrs.field()
+    zero_prob: float = attrs.field(default=0.85)
+    switch_prob: float = attrs.field(default=0.0)
+
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_rx, rng_ry, rng_zero = jax.random.split(rng, 3)
+        rx = jax.random.uniform(rng_rx, (1,), minval=-self.range, maxval=self.range)
+        ry = jax.random.uniform(rng_ry, (1,), minval=-self.range, maxval=self.range)
+
+        # Apply zero probability to rx and ry independently
+        rng_zero_rx, rng_zero_ry = jax.random.split(rng_zero)
+        zero_rx = jax.random.bernoulli(rng_zero_rx, self.zero_prob)
+        zero_ry = jax.random.bernoulli(rng_zero_ry, self.zero_prob)
+        rx = jnp.where(zero_rx, 0.0, rx)
+        ry = jnp.where(zero_ry, 0.0, ry)
+
+        return jnp.concatenate([rx, ry])
+    
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_command = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_command, prev_command)
+
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -1039,6 +1071,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_height=1.0,  # Maximum base height in meters
                 switch_prob=self.config.ctrl_dt / 3,  # Switch height every 5 seconds on average
             ),
+            XYOrientationCommand(
+                range=0.05*math.pi,
+                zero_prob=0.85,
+                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            ),
         ]
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
@@ -1047,8 +1084,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
             AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
-            UprightReward(scale=0.3),
-            BaseHeightReward(scale=2.0, error_scale=0.05),
+            XYOrientationReward(scale=1.0, error_scale=0.025),
+            BaseHeightReward(scale=1.0, error_scale=0.05),
             # Normalization penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
@@ -1096,7 +1133,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        num_commands = 2 + 4 + 1  # lin vel + ang vel + base height
+        num_commands = 2 + 4 + 1 + 2  # lin vel + ang vel + base height + base xy orient
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -1145,7 +1182,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         base_height_cmd = commands["base_height_command"]
-
+        base_xy_orient_cmd = commands["xyorientation_command"]
         # Manually normalize the command inputs to approx [-10, 10]
         obs = [
             joint_pos_n,  # NUM_JOINTS
@@ -1154,6 +1191,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             lin_vel_cmd_2,  # 2
             ang_vel_cmd,  # 4
             (base_height_cmd-0.85) * 67,  # 1
+            base_xy_orient_cmd * 64,  # 2
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1181,6 +1219,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         base_height_cmd = commands["base_height_command"]
+        base_xy_orient_cmd = commands["xyorientation_command"]
 
         # privileged obs
         feet_contact_4 = observations["feet_contact_observation"]
@@ -1203,6 +1242,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 lin_vel_cmd_2,
                 ang_vel_cmd,
                 (base_height_cmd-0.85) * 67,
+                base_xy_orient_cmd * 64,
                 imu_acc_3, # m/s^2
                 imu_gyro_3, # rad/s
                 # privileged obs:
