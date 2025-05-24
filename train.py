@@ -563,11 +563,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -627,8 +627,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             TimestepPhaseObservation(),
-            ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(20)),
+            ksim.JointPositionObservation(noise=math.radians(3)),
+            ksim.JointVelocityObservation(noise=math.radians(90)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -643,7 +643,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.3,
+                noise=0.5,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -701,15 +701,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.UprightReward(scale=2.5),
             ksim.BaseHeightReward(height_target=1.1, scale=1.0),
             # Normalisation penalties.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=False),
-            ksim.JointAccelerationPenalty(scale=-0.1, scale_by_curriculum=False),
-            ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=False),
-            ksim.LinkAccelerationPenalty(scale=-0.1, scale_by_curriculum=False),
-            ksim.ActionAccelerationPenalty(scale=-0.1, scale_by_curriculum=False),
-            ksim.LinkJerkPenalty(scale=-0.1, scale_by_curriculum=False),
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.05, scale_by_curriculum=False),
-            ksim.LinearVelocityPenalty(index=("z",), scale=-0.05, scale_by_curriculum=False),
-            ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=False),
+            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.JointVelocityPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.LinkAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.LinkJerkPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.05, scale_by_curriculum=True),
+            ksim.LinearVelocityPenalty(index=("z",), scale=-0.05, scale_by_curriculum=True),
+            ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
