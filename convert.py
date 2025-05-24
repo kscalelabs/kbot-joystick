@@ -47,7 +47,7 @@ def main() -> None:
     # Constant values.
     carry_shape = (task.config.depth, task.config.hidden_size)
     num_joints = len(joint_names)
-    num_commands = 7  # joystick command
+    num_commands = 3  # linear + angular velocity command
 
     @jax.jit
     def init_fn() -> Array:
@@ -59,6 +59,7 @@ def main() -> None:
         joint_angular_velocities: Array,
         projected_gravity: Array,
         accelerometer: Array,
+        gyroscope: Array,
         time: Array,
         command: Array,
         carry: Array,
@@ -89,6 +90,7 @@ def main() -> None:
                 command,
                 GAIT_FREQ,
                 accelerometer,
+                gyroscope,
             ],
             axis=-1,
         )
