@@ -468,6 +468,15 @@ class FeetPositionObservation(ksim.Observation):
         
         return jnp.concatenate([fl, fr], axis=-1)
 
+
+@attrs.define(frozen=True)
+class BaseHeightObservation(ksim.Observation):
+    """Observation of the base height."""
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.xpos[1, 2]
+
+
 @attrs.define(kw_only=True)
 class AngularVelocityCommandMarker(ksim.vis.Marker):
     """Visualise the 1-D yaw-rate command."""
@@ -1015,6 +1024,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 floor_threshold=0.0,
                 in_robot_frame=True,
             ),
+            BaseHeightObservation(),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -1132,6 +1142,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + num_joints  # actuator force
             + 3
             + 3  # imu_acc/gyro (privileged copies)
+            + 1  # base height
         )
 
         if self.config.use_acc_gyro:
@@ -1214,6 +1225,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         base_lin_vel_3 = observations["base_linear_velocity_observation"]
         base_ang_vel_3 = observations["base_angular_velocity_observation"]
         actuator_force_n = observations["actuator_force_observation"]
+        base_height = observations["base_height_observation"]
 
         # Manually normalize the command inputs to approx [-10, 10]
         obs_n = jnp.concatenate(
@@ -1238,6 +1250,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_ang_vel_3,
                 feet_contact_4,
                 feet_position_6,
+                base_height,
             ],
             axis=-1,
         )
