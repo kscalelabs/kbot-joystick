@@ -1001,8 +1001,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
-            AlternatingSingleFootReward(scale=1.0),
-            FeetAirtimeReward(scale=1.0),
+            # AlternatingSingleFootReward(scale=1.0),
+            FeetAirtimeReward(scale=0.1),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
