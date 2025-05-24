@@ -342,19 +342,29 @@ class LinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        # need to get lin vel obs from sensor, because xvel is not available in Trajectory.
         if self.linvel_obs_name not in trajectory.obs:
             raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
 
-        # Get global frame velocity and transform to robot frame
+        # Get global frame velocities
         global_vel = trajectory.obs[self.linvel_obs_name]
-        local_vel = xax.rotate_vector_by_quat(global_vel, trajectory.qpos[..., 3:7], inverse=True)
-        
-        # Compare command (already in local frame) with local velocity
-        command = trajectory.command[self.command_name]
-        lin_vel_error = xax.get_norm(command - local_vel[..., :2], self.norm).sum(axis=-1)
-        reward_value = jnp.exp(-lin_vel_error / self.error_scale)
 
-        return reward_value
+        # get base quat, only yaw.
+        # careful to only rotate in z, disregard rx and ry, bad conflict with roll and pitch.
+        base_euler = xax.quat_to_euler(trajectory.xquat[..., 1, :])
+        base_euler = base_euler.at[..., 0].set(0.0)
+        base_euler = base_euler.at[..., 1].set(0.0)
+        base_z_quat = xax.euler_to_quat(base_euler)
+
+        # rotate local frame commands to global frame
+        robot_vel_cmd = jnp.zeros_like(global_vel).at[..., :2].set(trajectory.command[self.command_name])
+        global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
+
+        # now compute error. special trick: different kernels for standing and walking.
+        zero_cmd_mask = jnp.linalg.norm(global_vel_cmd, axis=-1) < 1e-3 #TODO mask should also take turn rate
+        vel_error = jnp.linalg.norm(global_vel - global_vel_cmd, axis=-1)
+        error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
+        return jnp.exp(-error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -365,32 +375,14 @@ class AngularVelocityTrackingReward(ksim.Reward):
     command_name: str = attrs.field(default="angular_velocity_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # Get commanded heading and make pure yaw quaternion [cos(rz/2), 0, 0, sin(rz/2)]
-        rz = trajectory.command[self.command_name][..., 1]  # shape: (batch,)
-        target_quat = jnp.stack([jnp.cos(rz/2), jnp.zeros_like(rz), jnp.zeros_like(rz), jnp.sin(rz/2)], axis=-1)  # shape: (batch, 4)
+        # need to work with carry to accumulate rz
         
-        # Get base quaternion (first body)
-        current_quat = trajectory.xquat[..., 1, :4]  # shape: (batch, 4). base is 1st element not 0th?
-        
-        # q_diff = q_target * q_current^-1
-        # For quaternion multiplication [w1,x1,y1,z1] * [w2,x2,y2,z2]:
-        q_diff = jnp.stack([
-            target_quat[..., 0]*current_quat[..., 0] + target_quat[..., 1]*current_quat[..., 1] + 
-            target_quat[..., 2]*current_quat[..., 2] + target_quat[..., 3]*current_quat[..., 3],
-            
-            -target_quat[..., 0]*current_quat[..., 1] + target_quat[..., 1]*current_quat[..., 0] + 
-            target_quat[..., 2]*current_quat[..., 3] - target_quat[..., 3]*current_quat[..., 2],
-            
-            -target_quat[..., 0]*current_quat[..., 2] - target_quat[..., 1]*current_quat[..., 3] + 
-            target_quat[..., 2]*current_quat[..., 0] + target_quat[..., 3]*current_quat[..., 1],
-            
-            -target_quat[..., 0]*current_quat[..., 3] + target_quat[..., 1]*current_quat[..., 2] - 
-            target_quat[..., 2]*current_quat[..., 1] + target_quat[..., 3]*current_quat[..., 0]
-        ], axis=-1)
-        
-        # Get angle from quaternion difference
-        error = 2.0 * jnp.arctan2(q_diff[..., 3], q_diff[..., 0])
-        return jnp.exp(-jnp.abs(error) / self.error_scale)
+        # TODO temp HACK 
+        target_quat = jnp.array([1.0, 0.0, 0.0, 0.0])
+        current_quat = trajectory.xquat[..., 1, :]
+        quat_error = 1 - jnp.inner(target_quat, current_quat)**2
+        return jnp.exp(-jnp.abs(quat_error) / self.error_scale)
+
 
 
 @attrs.define(frozen=True)
@@ -401,7 +393,8 @@ class XYOrientationReward(ksim.Reward):
     command_name: str = attrs.field(default="xyorientation_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        euler_orientation = xax.quat_to_euler(trajectory.qpos[..., 3:7])
+        euler_orientation = xax.quat_to_euler(trajectory.xquat[..., 1, :])
+        # TODO rotate base xquat by commanded rz before comparing with local xy commands
         euler_orientation = euler_orientation.at[..., 2].set(0.0)  # ignore yaw
         base_xy_quat = xax.euler_to_quat(euler_orientation)
 
@@ -418,26 +411,16 @@ class XYOrientationReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class BaseHeightReward(ksim.Reward):
-    """Reward for keeping the base height at the commanded height.
-    
-    Uses exponential error function to reward height tracking:
-    reward = exp(-|current_height - commanded_height| / error_scale)
-    """
+    """Reward for keeping the base height at the commanded height."""
 
     error_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # Get current base height (z coordinate)
-        current_height = trajectory.qpos[..., 2] # TODO confirm
-        
-        # Get commanded height
+        current_height = trajectory.xpos[..., 1, 2] # 1st body, because world is 0. 2nd element is z.
         commanded_height = trajectory.command["base_height_command"][..., 0]
         
-        # Compute error and reward
         height_error = jnp.abs(current_height - commanded_height)
-        reward = jnp.exp(-height_error / self.error_scale)
-        
-        return reward
+        return jnp.exp(-height_error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1067,9 +1050,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ctrl_dt=self.config.ctrl_dt,
             ),
             BaseHeightCommand(
-                min_height=0.7,  # Minimum base height in meters
-                max_height=1.0,  # Maximum base height in meters
-                switch_prob=self.config.ctrl_dt / 3,  # Switch height every 5 seconds on average
+                min_height=0.7,
+                max_height=1.0,
+                switch_prob=self.config.ctrl_dt / 3, 
             ),
             XYOrientationCommand(
                 range=0.05*math.pi,
