@@ -989,8 +989,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.005, scale_by_curriculum=True),
-            ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.005, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
+            ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
