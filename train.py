@@ -81,11 +81,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=10.0,
+        value=30.0,
         help="Increase the curriculum level when the mean trajectory length is above this threshold.",
     )
     decrease_threshold: float = xax.field(
-        value=1.0,
+        value=10.0,
         help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
     )
     min_level_steps: int = xax.field(
@@ -702,12 +702,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.BaseHeightReward(height_target=1.1, scale=1.0),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
-            ksim.JointAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
-            ksim.JointVelocityPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.05, scale_by_curriculum=True),
+            ksim.JointVelocityPenalty(scale=-0.05, scale_by_curriculum=True),
             ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.LinkAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.1, scale_by_curriculum=True),
-            ksim.LinkJerkPenalty(scale=-0.1, scale_by_curriculum=True),
+            ksim.LinkAccelerationPenalty(scale=-0.05, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.05, scale_by_curriculum=True),
+            ksim.LinkJerkPenalty(scale=-0.05, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.05, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.05, scale_by_curriculum=True),
             ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
@@ -736,6 +736,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
+            min_level=0.01,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
