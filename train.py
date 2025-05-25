@@ -101,19 +101,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1e-5,
         help="Weight decay for the Adam optimizer.",
     )
-    entropy_coef: float = xax.field(
-        value=0.004,
-        help="Entropy coefficient for PPO: high = more exploration.",
-    )
 
-    render_full_every_n_seconds: float = xax.field(
-        value=0,  # ALWAYS!
-        help="Render the trajectory (without associated graphs) every N seconds",
-    )
-    max_values_per_plot: int = xax.field(
-        value=50,
-        help="The maximum number of values to plot for each key.",
-    )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -383,23 +371,23 @@ class AngularVelocityTrackingReward(ksim.Reward):
     command_name: str = attrs.field(default="angular_velocity_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        return 1.0
-    # TODO this is complete nonsense
-        # need to work with carry to accumulate rz
-        
-        # TODO temp HACK 
-        target_quat = jnp.array([1.0, 0.0, 0.0, 0.0])
-        target_euler = xax.quat_to_euler(target_quat)
-        target_rz = target_euler[..., 2]
+        base_yaw = xax.quat_to_euler(trajectory.xquat[..., 1, :])[:, 2]
+        base_yaw_cmd = trajectory.command[self.command_name][..., 2]
 
+        base_yaw_quat = xax.euler_to_quat(jnp.stack([
+            jnp.zeros_like(base_yaw_cmd),
+            jnp.zeros_like(base_yaw_cmd),
+            base_yaw
+        ], axis=-1))
+        base_yaw_target_quat = xax.euler_to_quat(jnp.stack([
+            jnp.zeros_like(base_yaw_cmd),
+            jnp.zeros_like(base_yaw_cmd),
+            base_yaw_cmd
+        ], axis=-1))
 
-
-
-        
-        current_quat = trajectory.xquat[..., 1, :]
-        quat_error = 1 - jnp.inner(target_quat, current_quat)**2
-        return jnp.exp(-jnp.abs(quat_error) / self.error_scale)
-
+        # Compute quaternion error
+        quat_error = 1 - jnp.sum(base_yaw_target_quat * base_yaw_quat, axis=-1)**2
+        return jnp.exp(-quat_error / self.error_scale)
 
 
 @attrs.define(frozen=True)
@@ -422,7 +410,7 @@ class XYOrientationReward(ksim.Reward):
         ], axis=-1)
         base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
 
-        quat_error = 1 - jnp.sum(base_xy_quat_cmd * base_xy_quat, axis=-1) ** 2
+        quat_error = 1 - jnp.sum(base_xy_quat_cmd * base_xy_quat, axis=-1)**2
         return jnp.exp(-quat_error / self.error_scale)
 
 
@@ -576,14 +564,7 @@ class LinearVelocityCommandMarker(ksim.vis.Marker):
 
 @attrs.define(frozen=True)
 class AngularVelocityCommand(ksim.Command):
-    """Command to turn the robot.
-    
-    Outputs a 4D vector containing:
-    - ang_vel_command: The commanded angular velocity
-    - heading_cmd: The commanded heading (integrated from ang_vel)
-    - sin(error): Sine of heading error (robot frame)
-    - cos(error): Cosine of heading error (robot frame)
-    """
+    """Command to turn the robot."""
 
     scale: float = attrs.field()
     ctrl_dt: float = attrs.field()
@@ -592,47 +573,62 @@ class AngularVelocityCommand(ksim.Command):
     min_magnitude: float = attrs.field(default=0.01)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        """Returns (4,) array with [ang_vel_cmd, heading_cmd, sin(error), cos(error)]."""
+        # sample ang vel cmd
         rng_a, rng_b = jax.random.split(rng)
-        ang_vel_cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(ang_vel_cmd) < self.min_magnitude)
-        ang_vel_cmd = jnp.where(zero_mask, jnp.zeros_like(ang_vel_cmd), ang_vel_cmd)
+        yaw_vel_cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
+        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(yaw_vel_cmd) < self.min_magnitude)
+        yaw_vel_cmd = jnp.where(zero_mask, jnp.zeros_like(yaw_vel_cmd), yaw_vel_cmd)
+
+        # init: read og base quat, get rz, thats init heading.
+        # then spin back base quat by euler [0 0 -init_rz], to get it to face 1 0 0 0.
+        # then every timestep, add rz_cmd*dt to heading, and spin back the base quat. 
+        # spun back base quat is obs. goal for model is to keep it at 1 0 0 0.
+        # can also use this method for roll and pitch cmd.
+
+        # get init heading rz
+        init_quat = physics_data.xquat[1]
+        init_euler = xax.quat_to_euler(init_quat)
+        init_rz = init_euler[..., 2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
+        init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
+
+        # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
+        # TODO temp heading obs, no noise for now. need solution.
+        heading_obs = physics_data.xquat[..., 1, :]
         
-        # Initial heading command is 0, and since we're starting, error is 0 so sin=0, cos=1
-        return jnp.array([ang_vel_cmd[0], 0.0, 0.0, 1.0])
+        # Rotate heading_obs by inverse of init_rz_quat to spin it back
+        init_rz_quat_inv = jnp.array([init_rz_quat[0], -init_rz_quat[1], -init_rz_quat[2], -init_rz_quat[3]])
+        heading_obs = init_rz_quat_inv * heading_obs
+        
+        # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
+        # Combine into single vector [1], [4], [1] -- > [6]
+        return jnp.concatenate([yaw_vel_cmd, heading_obs, init_rz], axis=0)
+
 
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
+    ) -> Array:       
+        # Extract previous values
+        prev_yaw_vel = prev_command[0]
+        yaw_cmd = prev_command[5]  # accumulated yaw, passed by carry for now
+        
+        # Update accumulated yaw by integrating angular velocity
+        yaw_cmd = yaw_cmd + prev_yaw_vel * self.ctrl_dt
+        
+        # Get current heading observation and rotate it back by yaw_cmd
+        heading_obs = physics_data.xquat[1]  # Base quaternion
+        yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
+        # For unit quaternions, inverse is just the conjugate (negate x,y,z)
+        yaw_cmd_quat_inv = jnp.array([yaw_cmd_quat[0], -yaw_cmd_quat[1], -yaw_cmd_quat[2], -yaw_cmd_quat[3]])
+        heading_obs = yaw_cmd_quat_inv * heading_obs
+
+        updated_command = jnp.concatenate([jnp.array([prev_yaw_vel]), heading_obs, jnp.array([yaw_cmd])], axis=0)
+        
+        # sample new commands
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        
-        # Extract previous values
-        prev_ang_vel = prev_command[0]
-        prev_heading_cmd = prev_command[1]
-        
-        # Generate new command if switching
         new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        ang_vel_cmd = jnp.where(switch_mask, new_commands[0], prev_ang_vel)
-        
-        # Update commanded heading by integrating angular velocity
-        heading_cmd = prev_heading_cmd + prev_ang_vel * self.ctrl_dt
-        
-        # Create unit vector pointing in commanded direction
-        cmd_dir = jnp.array([jnp.cos(heading_cmd), jnp.sin(heading_cmd), 0.0])
-        
-        # Get current robot orientation and rotate command vector to robot frame
-        quat = physics_data.qpos[3:7]  # Base quaternion
-        # Rotate command vector into robot frame to get error
-        cmd_in_robot_frame = xax.rotate_vector_by_quat(cmd_dir, quat, inverse=True)
-        
-        # Extract error components - in robot frame, forward is [1,0,0]
-        # so error components are directly the y (sin) and x (cos) components
-        sin_error = cmd_in_robot_frame[1]  # y component is sin
-        cos_error = cmd_in_robot_frame[0]  # x component is cos
-        
-        # Return [ang_vel_cmd, heading_cmd, sin(error), cos(error)]
-        return jnp.array([ang_vel_cmd, heading_cmd, sin_error, cos_error])
+        cmd = jnp.where(switch_mask, new_commands, updated_command)
+        return cmd
 
     def get_markers(self) -> Collection[ksim.vis.Marker]:
         return [AngularVelocityCommandMarker.get(self.command_name)]
@@ -1093,7 +1089,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             # ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
-            # AngularVelocityTrackingReward(scale=0.0, error_scale=0.05), # TODO broken
+            AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
             XYOrientationReward(scale=1.0, error_scale=0.025),
             BaseHeightReward(scale=1.0, error_scale=0.05),
             # Normalization penalties.
@@ -1143,7 +1139,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         if self.config.use_acc_gyro:
             num_actor_obs += 6
 
-        num_commands = 2 + 4 + 1 + 2  # lin vel + ang vel + base height + base xy orient
+        num_commands = (
+            2  # linear velocity command (x, y)
+            + 6  # angular velocity command (cmd, heading_obs[4], carry[1])
+            + 1  # base height command
+            + 2  # base xy orientation command
+        )
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -1368,6 +1369,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=2.0, # temporarily putting this lower to go faster
             global_grad_clip=2.0,
+            entropy_coef=0.004,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
@@ -1378,6 +1380,9 @@ if __name__ == "__main__":
             # Visualization parameters.
             render_track_body_id=0,
             render_markers=True,
+            render_full_every_n_seconds=0,
+            render_length_seconds=10,
+            max_values_per_plot=50,
             # Checkpointing parameters.
             save_every_n_seconds=60,
         ),
