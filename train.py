@@ -110,6 +110,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0,  # ALWAYS!
         help="Render the trajectory (without associated graphs) every N seconds",
     )
+    max_values_per_plot: int = xax.field(
+        value=50,
+        help="The maximum number of values to plot for each key.",
+    )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -360,9 +364,13 @@ class LinearVelocityTrackingReward(ksim.Reward):
         robot_vel_cmd = jnp.zeros_like(global_vel).at[..., :2].set(trajectory.command[self.command_name])
         global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
 
+        # drop vz. vz conflicts with base height reward.
+        global_vel_xy_cmd = global_vel_cmd[..., :2]
+        global_vel_xy = global_vel[..., :2]
+
         # now compute error. special trick: different kernels for standing and walking.
-        zero_cmd_mask = jnp.linalg.norm(global_vel_cmd, axis=-1) < 1e-3 #TODO mask should also take turn rate
-        vel_error = jnp.linalg.norm(global_vel - global_vel_cmd, axis=-1)
+        zero_cmd_mask = jnp.linalg.norm(global_vel_xy_cmd, axis=-1) < 1e-3 #TODO mask should also take turn rate
+        vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
 
@@ -375,10 +383,19 @@ class AngularVelocityTrackingReward(ksim.Reward):
     command_name: str = attrs.field(default="angular_velocity_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        return 1.0
+    # TODO this is complete nonsense
         # need to work with carry to accumulate rz
         
         # TODO temp HACK 
         target_quat = jnp.array([1.0, 0.0, 0.0, 0.0])
+        target_euler = xax.quat_to_euler(target_quat)
+        target_rz = target_euler[..., 2]
+
+
+
+
+        
         current_quat = trajectory.xquat[..., 1, :]
         quat_error = 1 - jnp.inner(target_quat, current_quat)**2
         return jnp.exp(-jnp.abs(quat_error) / self.error_scale)
@@ -1076,7 +1093,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             # ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
-            AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
+            # AngularVelocityTrackingReward(scale=0.0, error_scale=0.05), # TODO broken
             XYOrientationReward(scale=1.0, error_scale=0.025),
             BaseHeightReward(scale=1.0, error_scale=0.05),
             # Normalization penalties.
