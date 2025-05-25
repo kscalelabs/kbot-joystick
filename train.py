@@ -474,7 +474,7 @@ class BaseHeightObservation(ksim.Observation):
     """Observation of the base height."""
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.xpos[1, 2]
+        return state.physics_state.data.xpos[1, 2:]
 
 
 @attrs.define(kw_only=True)
