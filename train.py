@@ -564,7 +564,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        model = mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        names_to_idxs = ksim.get_geom_data_idx_by_name(model)
+        model.geom_priority[names_to_idxs["floor"]] = 2.0
+        return model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
@@ -613,7 +616,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             ksim.JumpEvent(
                 jump_height_range=(0.0, 0.3),
-                interval_range=(2.0, 4.0),
+                interval_range=(3.0, 8.0),
             ),
         ]
 
@@ -699,7 +702,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 command_name="switching_joystick_command",
             ),
             ksim.UprightReward(scale=2.5),
-            ksim.BaseHeightReward(height_target=1.1, scale=1.0),
+            ksim.BaseHeightReward(height_target=1.05, scale=1.0),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.05, scale_by_curriculum=True),
@@ -709,7 +712,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ActionAccelerationPenalty(scale=-0.05, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.05, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.05, scale_by_curriculum=True),
-            ksim.LinearVelocityPenalty(index=("z",), scale=-0.05, scale_by_curriculum=True),
+            ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
             ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
