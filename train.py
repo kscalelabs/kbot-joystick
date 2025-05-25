@@ -839,7 +839,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        model = mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        names_to_idxs = ksim.get_geom_data_idx_by_name(model)
+        model.geom_priority[names_to_idxs["floor"]] = 2.0
+        return model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot"))
@@ -868,7 +871,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.01, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.2, scale_upper=2.0
             ),
         ]
 
