@@ -595,7 +595,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.01, scale_upper=3.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.2, scale_upper=2.0
             ),
         ]
 
