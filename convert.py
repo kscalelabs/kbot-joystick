@@ -13,8 +13,7 @@ from kinfer.export.serialize import pack
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_JOYSTICK = 7
-NUM_COMMANDS_MODEL = 3
+NUM_COMMANDS_MODEL = 11
 
 
 def make_export_model(model: Model) -> Callable:
