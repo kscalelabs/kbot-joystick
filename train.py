@@ -396,7 +396,11 @@ class LinearVelocityTrackingReward(ksim.Reward):
         global_vel_xy = global_vel[..., :2]
 
         # now compute error. special trick: different kernels for standing and walking.
-        zero_cmd_mask = jnp.linalg.norm(global_vel_xy_cmd, axis=-1) < 1e-3 #TODO mask should also take turn rate
+        zero_cmd_mask = (
+            jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
+        ) & (
+            jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
+        )
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
@@ -465,6 +469,31 @@ class BaseHeightReward(ksim.Reward):
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
 
+@attrs.define(frozen=True)
+class FeetPositionReward(ksim.Reward):
+    """ Reward for keeping the feet next to each other when standing still."""
+
+    error_scale: float = attrs.field(default=0.25)
+    stance_width: float = attrs.field(default=0.3)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        feet_pos = trajectory.obs["feet_position_observation"]
+        left_foot_pos = feet_pos[..., :3]  
+        right_foot_pos = feet_pos[..., 3:]
+
+        # standing?
+        zero_cmd_mask = (
+            jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
+        ) & (
+            jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
+        )
+
+        # Calculate stance errors
+        stance_x_error = jnp.abs(left_foot_pos[..., 0] - right_foot_pos[..., 0])
+        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[..., 1] - right_foot_pos[..., 1]) - self.stance_width)
+        stance_error = jnp.where(zero_cmd_mask, stance_x_error + stance_y_error, 0.0)**2 # ^2 to make less sensitive to small errors, smooth kernel
+
+        return jnp.exp(-stance_error / self.error_scale)
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetContactObservation(ksim.FeetContactObservation):
@@ -1121,31 +1150,31 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
-            # Standard rewards.
-            # ksim.StayAliveReward(scale=1.0),
+            # cmd
             LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
             AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
             XYOrientationReward(scale=1.0, error_scale=0.025),
             BaseHeightReward(scale=1.0, error_scale=0.05),
-            # Normalization penalties.
+            # shaping
+            # SingleFootContactReward(scale=0.3),
+            # FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            FeetPositionReward(scale=0.2, error_scale=0.05, stance_width=0.3),
+            # sim2real
+            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.1), # TODO best to have this in joint space vs pos space. looks like it is.
+
+        
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            # ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.005, scale_by_curriculum=False), # TODO this should be orientation
-            # ksim.LinearVelocityPenalty(index=("z",), scale=-0.005, scale_by_curriculum=True), # NOTE seems redundant with linear velocity tracking reward
-            # Bespoke rewards.
-            BentArmPenalty.create_penalty(physics_model, scale=-0.1), # TODO best to have this in joint space vs pos space. looks like it is.
             # StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
             # FeetSlipPenalty(scale=-0.25),
             # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
             #     scale=-0.03,
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             # ),
-            # SingleFootContactReward(scale=0.3),
-            # FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -1230,15 +1259,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ang_vel_cmd = commands["angular_velocity_command"]
         base_height_cmd = commands["base_height_command"]
         base_xy_orient_cmd = commands["xyorientation_command"]
-        # Manually normalize the command inputs to approx [-10, 10]
+
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
-            ang_vel_cmd,  # 4
-            (base_height_cmd-0.85) * 67,  # 1
-            base_xy_orient_cmd * 64,  # 2
+            # ang_vel_cmd,  # 6
+
+            # TODO HACK heading
+            ang_vel_cmd[..., :-1],
+            jnp.zeros_like(ang_vel_cmd[..., -1:]),
+
+            (base_height_cmd-0.85),  # 1
+            base_xy_orient_cmd,  # 2
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1280,7 +1314,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         actuator_force_n = observations["actuator_force_observation"]
         base_height = observations["base_height_observation"]
 
-        # Manually normalize the command inputs to approx [-10, 10]
         obs_n = jnp.concatenate(
             [   
                 # actor obs:
@@ -1288,9 +1321,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_vel_n / 10.0, # TODO fix this
                 proj_grav_3,
                 lin_vel_cmd_2,
-                ang_vel_cmd,
-                (base_height_cmd-0.85) * 67,
-                base_xy_orient_cmd * 64,
+                # ang_vel_cmd,
+
+                # TODO HACK heading
+                ang_vel_cmd[..., :-1],
+                jnp.zeros_like(ang_vel_cmd[..., -1:]),
+
+                (base_height_cmd-0.85),
+                base_xy_orient_cmd,
                 imu_acc_3, # m/s^2
                 imu_gyro_3, # rad/s
                 # privileged obs:

@@ -61,8 +61,6 @@ def main() -> None:
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        print(command)
-        print(command.shape)
         obs = jnp.concatenate(
             [
                 joint_angles,
