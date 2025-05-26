@@ -66,7 +66,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc: bool = xax.field(
+    use_acc_gyro: bool = xax.field(
         value=True,
         help="Whether to use the IMU acceleration observation.",
     )
@@ -653,6 +653,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 sensor_name="imu_acc",
                 noise=0.75,
             ),
+            ksim.SensorObservation.create(
+                physics_model=physics_model,
+                sensor_name="imu_gyro",
+                noise=math.radians(150),
+            ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_linvel", noise=0.0),
@@ -748,8 +753,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # timestep phase + joint pos / vel + proj_grav
         num_actor_obs = 4 + num_joints * 2 + 3
 
-        if self.config.use_acc:
-            num_actor_obs += 3
+        if self.config.use_acc_gyro:
+            num_actor_obs += 6
 
         num_commands = 7 + 1  # joystick OHE + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
@@ -766,10 +771,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 3  # base linear / angular vel
             + num_joints  # actuator force
             + 3  # imu_acc (privileged copies)
+            + 3  # imu_gyro (privileged copies)
         )
 
-        if self.config.use_acc:
-            num_critic_inputs -= 3
+        if self.config.use_acc_gyro:
+            num_critic_inputs -= 6
 
         return Model(
             key,
@@ -796,7 +802,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
-        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         joystick_cmd_ohe_7 = commands["switching_joystick_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
 
@@ -808,9 +814,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joystick_cmd_ohe_7,  # 7
             gait_freq_cmd_1,  # 1
         ]
-        if self.config.use_acc:
+        if self.config.use_acc_gyro:
             obs += [
                 imu_acc_3,  # 3
+                imu_gyro_3,  # 3
             ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
@@ -834,6 +841,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         # privileged obs
         imu_acc_3 = observations["sensor_observation_imu_acc"]
+        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         feet_contact_4 = observations["feet_contact_observation"]
         feet_position_6 = observations["feet_position_observation"]
         base_position_3 = observations["base_position_observation"]
@@ -852,6 +860,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 com_inertia_n,
                 com_vel_n,
                 imu_acc_3,
+                imu_gyro_3,
                 proj_grav_3,
                 actuator_force_n / 100.0,
                 base_position_3,
