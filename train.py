@@ -156,6 +156,30 @@ class FeetPhaseReward(ksim.Reward):
         reward *= command_norm > self.stand_still_threshold
         return reward
 
+@attrs.define(frozen=True, kw_only=True)
+class StandStillReward(ksim.Reward):
+    """Reward for standing still."""
+
+    scale: float = 1.0
+    sensitivity: float = 0.01
+    norm: xax.NormType = attrs.field(default="l1")
+    linear_velocity_cmd_name: str = attrs.field(default="linear_velocity_command")
+    angular_velocity_cmd_name: str = attrs.field(default="angular_velocity_command")
+    stand_still_threshold: float = attrs.field(default=0.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        vel_cmd = trajectory.command[self.linear_velocity_cmd_name]
+        ang_vel_cmd = trajectory.command[self.angular_velocity_cmd_name]
+        cmd_norm = jnp.linalg.norm(jnp.concatenate([vel_cmd, ang_vel_cmd], axis=-1), axis=-1)
+
+        error = jnp.sum(
+            jnp.square(trajectory.qpos[..., 7:] - jnp.array([v for _, v, _ in ZEROS])),
+            axis=-1,
+        )
+
+        reward = jnp.exp(-error / self.sensitivity)
+        reward *= cmd_norm < self.stand_still_threshold
+        return reward
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):
@@ -838,14 +862,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
         model = mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
         names_to_idxs = ksim.get_geom_data_idx_by_name(model)
         model.geom_priority[names_to_idxs["floor"]] = 2.0
         return model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -871,7 +895,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.2, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.3, scale_upper=1.5
             ),
         ]
 
@@ -977,7 +1001,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(
-                scale=1.5,
+                scale=2.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
@@ -1004,6 +1028,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
+            StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
             # AlternatingSingleFootReward(scale=1.0),
             FeetAirtimeReward(scale=0.1),
         ]
