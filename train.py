@@ -589,15 +589,14 @@ class AngularVelocityCommand(ksim.Command):
         init_quat = physics_data.xquat[1]
         init_euler = xax.quat_to_euler(init_quat)
         init_rz = init_euler[..., 2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
-        init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
+        inv_init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, -init_rz[0]]))
 
         # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
         # TODO temp heading obs, no noise for now. need solution.
         heading_obs = physics_data.xquat[..., 1, :]
         
         # Rotate heading_obs by inverse of init_rz_quat to spin it back
-        init_rz_quat_inv = jnp.array([init_rz_quat[0], -init_rz_quat[1], -init_rz_quat[2], -init_rz_quat[3]])
-        heading_obs = init_rz_quat_inv * heading_obs
+        heading_obs = xax.euler_to_quat(xax.rotate_vector_by_quat(xax.quat_to_euler(heading_obs), inv_init_rz_quat))
         
         # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
         # Combine into single vector [1], [4], [1] -- > [6]
