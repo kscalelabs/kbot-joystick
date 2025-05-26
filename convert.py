@@ -59,6 +59,7 @@ def main() -> None:
         joint_angular_velocities: Array,
         projected_gravity: Array,
         accelerometer: Array,
+        gyroscope: Array,
         time: Array,
         command: Array,
         carry: Array,

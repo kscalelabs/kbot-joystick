@@ -66,7 +66,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc_gyro: bool = xax.field(
+    use_acc: bool = xax.field(
         value=True,
         help="Whether to use the IMU acceleration observation.",
     )
@@ -605,13 +605,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=0.5,
-                y_force=0.5,
-                z_force=0.3,
-                force_range=(0.5, 2.0),
-                x_angular_force=0.7,
-                y_angular_force=0.7,
-                z_angular_force=0.7,
+                x_linvel=1.0,
+                y_linvel=1.0,
+                z_linvel=0.75,
+                x_angvel=0.8,
+                y_angvel=0.8,
+                z_angvel=0.8,
+                vel_range=(0.5, 1.5),
                 interval_range=(2.0, 4.0),
             ),
             ksim.JumpEvent(
@@ -646,7 +646,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.5,
+                noise=0.3,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -753,8 +753,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # timestep phase + joint pos / vel + proj_grav
         num_actor_obs = 4 + num_joints * 2 + 3
 
-        if self.config.use_acc_gyro:
-            num_actor_obs += 6
+        if self.config.use_acc:
+            num_actor_obs += 3
 
         num_commands = 7 + 1  # joystick OHE + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
@@ -774,8 +774,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 3  # imu_gyro (privileged copies)
         )
 
-        if self.config.use_acc_gyro:
-            num_critic_inputs -= 6
+        if self.config.use_acc:
+            num_critic_inputs -= 3
 
         return Model(
             key,
@@ -814,10 +814,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joystick_cmd_ohe_7,  # 7
             gait_freq_cmd_1,  # 1
         ]
-        if self.config.use_acc_gyro:
+        if self.config.use_acc:
             obs += [
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
             ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
@@ -978,6 +977,7 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             action_latency_range=(0.003, 0.005),  # Simulate 3-5ms of latency.
+            actuator_update_dt=0.01,
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
