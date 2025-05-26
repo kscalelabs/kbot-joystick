@@ -103,6 +103,45 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
 
 
+# TODO put this in xax?
+def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
+    """Rotates one quaternion by another quaternion through quaternion multiplication.
+    
+    This performs the operation: rotating_quat * quat_to_rotate * rotating_quat^(-1) if inverse=False
+    or rotating_quat^(-1) * quat_to_rotate * rotating_quat if inverse=True
+    
+    Args:
+        quat_to_rotate: The quaternion being rotated (w,x,y,z), shape (*, 4)
+        rotating_quat: The quaternion performing the rotation (w,x,y,z), shape (*, 4)
+        inverse: If True, rotate by the inverse of rotating_quat
+        eps: Small epsilon value to avoid division by zero in normalization
+        
+    Returns:
+        The rotated quaternion (w,x,y,z), shape (*, 4)
+    """
+    # Normalize both quaternions
+    quat_to_rotate = quat_to_rotate / (jnp.linalg.norm(quat_to_rotate, axis=-1, keepdims=True) + eps)
+    rotating_quat = rotating_quat / (jnp.linalg.norm(rotating_quat, axis=-1, keepdims=True) + eps)
+    
+    # If inverse requested, conjugate the rotating quaternion (negate x,y,z components)
+    if inverse:
+        rotating_quat = rotating_quat.at[..., 1:].multiply(-1)
+    
+    # Extract components of both quaternions
+    w1, x1, y1, z1 = jnp.split(rotating_quat, 4, axis=-1)        # rotating quaternion 
+    w2, x2, y2, z2 = jnp.split(quat_to_rotate, 4, axis=-1)      # quaternion being rotated
+    
+    # Quaternion multiplication formula
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
+    
+    result = jnp.concatenate([w, x, y, z], axis=-1)
+    
+    # Normalize result
+    return result / (jnp.linalg.norm(result, axis=-1, keepdims=True) + eps)
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):
@@ -399,7 +438,6 @@ class XYOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         euler_orientation = xax.quat_to_euler(trajectory.xquat[..., 1, :])
-        # TODO rotate base xquat by commanded rz before comparing with local xy commands
         euler_orientation = euler_orientation.at[..., 2].set(0.0)  # ignore yaw
         base_xy_quat = xax.euler_to_quat(euler_orientation)
 
@@ -589,14 +627,14 @@ class AngularVelocityCommand(ksim.Command):
         init_quat = physics_data.xquat[1]
         init_euler = xax.quat_to_euler(init_quat)
         init_rz = init_euler[..., 2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
-        inv_init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, -init_rz[0]]))
+        init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
 
         # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
         # TODO temp heading obs, no noise for now. need solution.
         heading_obs = physics_data.xquat[..., 1, :]
         
         # Rotate heading_obs by inverse of init_rz_quat to spin it back
-        heading_obs = xax.euler_to_quat(xax.rotate_vector_by_quat(xax.quat_to_euler(heading_obs), inv_init_rz_quat))
+        heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
         
         # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
         # Combine into single vector [1], [4], [1] -- > [6]
@@ -616,9 +654,7 @@ class AngularVelocityCommand(ksim.Command):
         # Get current heading observation and rotate it back by yaw_cmd
         heading_obs = physics_data.xquat[1]  # Base quaternion
         yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
-        # For unit quaternions, inverse is just the conjugate (negate x,y,z)
-        yaw_cmd_quat_inv = jnp.array([yaw_cmd_quat[0], -yaw_cmd_quat[1], -yaw_cmd_quat[2], -yaw_cmd_quat[3]])
-        heading_obs = yaw_cmd_quat_inv * heading_obs
+        heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
 
         updated_command = jnp.concatenate([jnp.array([prev_yaw_vel]), heading_obs, jnp.array([yaw_cmd])], axis=0)
         
