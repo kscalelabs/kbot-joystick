@@ -212,7 +212,7 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AlternatingSingleFootReward(ksim.Reward):
+class AlternatingSingleFootReward(ksim.StatefulReward):
     """Alternating single-support with height-based scaling.
 
     • reward = 1 in the past window the robot went from left-only to
@@ -233,53 +233,78 @@ class AlternatingSingleFootReward(ksim.Reward):
     target_swing_height: float = 0.25
     height_sensitivity: float = 0.1
 
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
-        contact = traj.obs[self.feet_contact_obs_name]
-        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
-        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+    def initial_carry(self, rng: PRNGKeyArray) -> xax.FrozenDict[str, Array]:
+        k = int(self.window_size / self.ctrl_dt)
+        return xax.FrozenDict({"window": jnp.zeros((k,), dtype=jnp.int8)})
+
+    def get_reward_stateful(self, traj: ksim.Trajectory, carry: xax.FrozenDict[str, Array]) -> tuple[Array, xax.FrozenDict[str, Array]]:
+        def _single_timestep_reward(
+            window: Array, 
+            timestep_data: tuple[Array, Array, Array, Array, Array]
+        ) -> tuple[Array, Array]:
+            contact, foot_pos, v_cmd, w_cmd, done = timestep_data
+            
+            # Calculate foot contact states
+            left = jnp.any(contact[:2] > 0.5)
+            right = jnp.any(contact[2:] > 0.5)
+
+            # Extract foot heights
+            left_z, right_z = foot_pos[2], foot_pos[5]
+
+            # Calculate height error for both feet
+            left_height_error = jnp.abs(left_z - self.target_swing_height)
+            right_height_error = jnp.abs(right_z - self.target_swing_height)
+            left_height_scale = jnp.exp(-left_height_error / self.height_sensitivity)
+            right_height_scale = jnp.exp(-right_height_error / self.height_sensitivity)
+
+            right_clear = right_z > self.min_swing_height
+            left_clear = left_z > self.min_swing_height
+
+            left_only = left & (~right) & right_clear
+            right_only = right & (~left) & left_clear
+
+            # Apply height scaling to the single-support conditions
+            left_only = left_only * left_height_scale
+            right_only = right_only * right_height_scale
+
+            side = jnp.where(left_only > 0, 1, jnp.where(right_only > 0, -1, 0)).astype(jnp.int8)
+
+            new_window = jnp.concatenate([window[1:], jnp.array([side])])
+
+            has_l = jnp.any(new_window == 1)
+            has_r = jnp.any(new_window == -1)
+            diff = jnp.abs(new_window[1:] - new_window[:-1])
+            switched = jnp.any(diff == 2)
+
+            alternating = has_l & has_r & switched
+
+            cmd_mag = jnp.linalg.norm(jnp.concatenate([v_cmd, w_cmd], axis=-1), axis=-1)
+            standing = cmd_mag <= self.stand_still_threshold
+
+            reward = jnp.where(standing | alternating, 1.0, 0.0)
+            
+            return new_window, reward
 
         if self.feet_pos_obs_name not in traj.obs:
             raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it to the task.")
 
-        foot_pos = traj.obs[self.feet_pos_obs_name]  # (..., 6)
-        left_z, right_z = foot_pos[..., 2], foot_pos[..., 5]
+        # Prepare timestep data
+        contact = traj.obs[self.feet_contact_obs_name]  # (time, 4)
+        foot_pos = traj.obs[self.feet_pos_obs_name]     # (time, 6)
+        v_cmd = traj.command[self.linear_velocity_cmd_name]  # (time, 2)
+        w_cmd = traj.command[self.angular_velocity_cmd_name] # (time, 1)
+        done = traj.done  # (time,)
 
-        # Calculate height error for both feet
-        left_height_error = jnp.abs(left_z - self.target_swing_height)
-        right_height_error = jnp.abs(right_z - self.target_swing_height)
-        
-        # Scale factor based on height error (1.0 when at target height, decreases with error)
-        left_height_scale = jnp.exp(-left_height_error / self.height_sensitivity)
-        right_height_scale = jnp.exp(-right_height_error / self.height_sensitivity)
+        timestep_data = (contact, foot_pos, v_cmd, w_cmd, done)
 
-        right_clear = right_z > self.min_swing_height
-        left_clear = left_z > self.min_swing_height
+        # Use scan to process each timestep
+        final_window, rewards = jax.lax.scan(
+            _single_timestep_reward,
+            carry["window"],
+            timestep_data
+        )
 
-        left_only = left & (~right) & right_clear
-        right_only = right & (~left) & left_clear
-
-        left_only = left_only * left_height_scale
-        right_only = right_only * right_height_scale
-
-        side = jnp.where(left_only > 0, 1, jnp.where(right_only > 0, -1, 0)).astype(jnp.int8)
-
-        k = int(self.window_size / self.ctrl_dt)
-        win = side[..., -k:]
-
-        has_l = jnp.any(win == 1, axis=-1)
-        has_r = jnp.any(win == -1, axis=-1)
-        diff = jnp.abs(win[..., 1:] - win[..., :-1])
-        switched = jnp.any(diff == 2, axis=-1)
-
-        alternating = has_l & has_r & switched
-
-        v_cmd = traj.command[self.linear_velocity_cmd_name]
-        w_cmd = traj.command[self.angular_velocity_cmd_name]
-        cmd_mag = jnp.linalg.norm(jnp.concatenate([v_cmd, w_cmd], axis=-1), axis=-1)
-        standing = cmd_mag <= self.stand_still_threshold
-
-        reward = jnp.where(standing | alternating, 1.0, 0.0)
-        return reward * self.scale
+        return rewards * self.scale, xax.FrozenDict({"window": final_window})
 
 
 @attrs.define(frozen=True, kw_only=True)
