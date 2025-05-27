@@ -646,12 +646,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.3,
+                noise=0.2,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.75,
+                noise=0.5,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
