@@ -156,6 +156,7 @@ class FeetPhaseReward(ksim.Reward):
         reward *= command_norm > self.stand_still_threshold
         return reward
 
+
 @attrs.define(frozen=True, kw_only=True)
 class StandStillReward(ksim.Reward):
     """Reward for standing still."""
@@ -180,6 +181,7 @@ class StandStillReward(ksim.Reward):
         reward = jnp.exp(-error / self.sensitivity)
         reward *= cmd_norm < self.stand_still_threshold
         return reward
+
 
 @attrs.define(frozen=True, kw_only=True)
 class ContactForcePenalty(ksim.Reward):
@@ -208,6 +210,7 @@ class FeetSlipPenalty(ksim.Reward):
         contact = traj.obs[self.feet_contact_obs_name]
         return jnp.sum(vel * contact, axis=-1)
 
+
 @attrs.define(frozen=True, kw_only=True)
 class AlternatingSingleFootReward(ksim.Reward):
     """Alternating single-support.
@@ -219,19 +222,30 @@ class AlternatingSingleFootReward(ksim.Reward):
 
     scale: float = 1.0
     feet_contact_obs_name: str = "feet_contact_observation"
+    feet_pos_obs_name: str = "feet_position_observation"  # (xL,yL,zL,xR,yR,zR)
     linear_velocity_cmd_name: str = "linear_velocity_command"
     angular_velocity_cmd_name: str = "angular_velocity_command"
     ctrl_dt: float = 0.02
     stand_still_threshold: float = 0.01
-    window_size: float = 0.8
+    window_size: float = 0.6
+    min_swing_height: float = 0.05
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
         left = jnp.any(contact[..., :2] > 0.5, axis=-1)
         right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
 
-        left_only = jnp.logical_and(left, jnp.logical_not(right))
-        right_only = jnp.logical_and(right, jnp.logical_not(left))
+        if self.feet_pos_obs_name not in traj.obs:
+            raise ValueError(f"Observation {self.feet_pos_obs_name} not found; add it to the task.")
+
+        foot_pos = traj.obs[self.feet_pos_obs_name]  # (..., 6)
+        left_z, right_z = foot_pos[..., 2], foot_pos[..., 5]
+
+        right_clear = right_z > self.min_swing_height
+        left_clear = left_z > self.min_swing_height
+
+        left_only = left & (~right) & right_clear
+        right_only = right & (~left) & left_clear
 
         side = jnp.where(left_only, 1, jnp.where(right_only, -1, 0)).astype(jnp.int8)
 
@@ -379,7 +393,8 @@ class StraightLegPenalty(JointPositionPenalty):
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
-    
+
+
 class AnkleKneePenalty(JointPositionPenalty):
     @classmethod
     def create_penalty(
