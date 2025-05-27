@@ -228,7 +228,7 @@ class AlternatingSingleFootReward(ksim.Reward):
     ctrl_dt: float = 0.02
     stand_still_threshold: float = 0.01
     window_size: float = 0.6
-    min_swing_height: float = 0.05
+    min_swing_height: float = 0.15
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
@@ -955,12 +955,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=0.4,
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.75,
+                noise=0.5,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -1016,7 +1016,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=1.0),
             LinearVelocityTrackingReward(
-                scale=2.0,
+                scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
@@ -1044,7 +1044,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
             StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
-            AlternatingSingleFootReward(scale=1.0),
+            AlternatingSingleFootReward(scale=2.1),
             FeetAirtimeReward(scale=0.1),
         ]
 
@@ -1297,7 +1297,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.001, 0.008),  # Simulate 1-8ms of latency.
+            action_latency_range=(0.001, 0.005),  # Simulate 1-5ms of latency.
+            actuator_update_dt=0.01,
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
