@@ -81,11 +81,11 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The number of curriculum levels to use.",
     )
     increase_threshold: float = xax.field(
-        value=30.0,
+        value=5.0,
         help="Increase the curriculum level when the mean trajectory length is above this threshold.",
     )
     decrease_threshold: float = xax.field(
-        value=10.0,
+        value=2.0,
         help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
     )
     min_level_steps: int = xax.field(
@@ -646,7 +646,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.2,
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
