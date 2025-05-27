@@ -70,10 +70,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
-    stand_still_threshold: float = xax.field(
-        value=0.1,
-        help="The mininum command magnitude. Don't like tiny Vx commands like 0.00123",
-    )
     # Curriculum parameters.
     num_curriculum_levels: int = xax.field(
         value=100,
@@ -162,17 +158,16 @@ class FeetSlipPenalty(ksim.Reward):
     """Penalises COM motion while feet are in contact."""
 
     scale: float = -1.0
-    com_vel_obs_name: str = "center_of_mass_velocity_observation"
-    feet_contact_obs_name: str = "feet_contact_observation"
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        vel = jnp.linalg.norm(traj.obs[self.com_vel_obs_name][..., :2], axis=-1, keepdims=True)
-        contact = traj.obs[self.feet_contact_obs_name]
+        vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][..., :2], axis=-1, keepdims=True)
+        contact = traj.obs["feet_contact_observation"]
         return jnp.sum(vel * contact, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.Reward):
+    # TODO regard dones
     """Reward that encourages a single-foot contact pattern during locomotion.
 
     The reward returns ``1`` whenever exactly one foot is in contact with the
@@ -186,16 +181,8 @@ class SingleFootContactReward(ksim.Reward):
 
     scale: float = 1.0
     feet_contact_obs_name: str = "feet_contact_observation"
-    linear_velocity_cmd_name: str = "linear_velocity_command"
-    angular_velocity_cmd_name: str = "angular_velocity_command"
     ctrl_dt: float = 0.02
     window_size: float = 0.2  # seconds
-
-    def _single_contact(self, contact: Array) -> Array:
-        """Returns a boolean mask that is ``True`` when exactly one foot is in contact."""
-        left_contact = jnp.any(contact[..., :2] > 0.5, axis=-1)
-        right_contact = jnp.any(contact[..., 2:] > 0.5, axis=-1)
-        return jnp.logical_xor(left_contact, right_contact)
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         """Implements Eq. (14) – single-foot contact with 0.2 s window.
@@ -205,15 +192,13 @@ class SingleFootContactReward(ksim.Reward):
         magnitude is nonzero
         • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
         """
-        contact = traj.obs[self.feet_contact_obs_name]
+        contact = traj.obs["feet_contact_observation"]
         left = jnp.any(contact[..., :2] > 0.5, axis=-1)
         right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
         single = jnp.logical_xor(left, right)
 
         k = int(self.window_size / self.ctrl_dt)
-
         padded = jnp.concatenate([jnp.zeros_like(single[..., :k]), single], axis=-1)
-
         window_any = (
             jax.lax.reduce_window(
                 padded.astype(jnp.int32),
@@ -225,19 +210,20 @@ class SingleFootContactReward(ksim.Reward):
             )
             > 0
         )
-
         reward = window_any.astype(jnp.float32)
 
-        lin_cmd = traj.command[self.linear_velocity_cmd_name]
-        ang_cmd = traj.command[self.angular_velocity_cmd_name]
-        cmd_mag = jnp.linalg.norm(jnp.concatenate([lin_cmd, ang_cmd], axis=-1), axis=-1)
-        reward = jnp.where(cmd_mag <= 0.01, 1.0, reward)
-
+        is_zero_cmd = (
+            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
+        ) & (
+            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+        )
+        reward = jnp.where(is_zero_cmd, 1.0, reward)
         return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.Reward):
+    # TODO regard dones
     """Encourages reasonable step frequency by rewarding foot airtime.
 
     Each foot accumulates a *positive* reward proportional to the duration it
@@ -281,11 +267,13 @@ class FeetAirtimeReward(ksim.Reward):
         swing_reward = (left_air - self.touchdown_penalty) * td_l.astype(jnp.float32) + (right_air - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
         # standing mask
-        stand = (jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3) & (
+        is_zero_cmd = (
+            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
+        ) & (
             jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
         )
 
-        return jnp.where(stand, 0.0, swing_reward)
+        return jnp.where(is_zero_cmd, 0.0, swing_reward)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -481,19 +469,20 @@ class FeetPositionReward(ksim.Reward):
         left_foot_pos = feet_pos[..., :3]  
         right_foot_pos = feet_pos[..., 3:]
 
+        # Calculate stance errors
+        stance_x_error = jnp.abs(left_foot_pos[..., 0] - right_foot_pos[..., 0])
+        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[..., 1] - right_foot_pos[..., 1]) - self.stance_width)
+        stance_error = stance_x_error + stance_y_error
+        reward = jnp.exp(-stance_error / self.error_scale)
+
         # standing?
         zero_cmd_mask = (
             jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
             jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
         )
-
-        # Calculate stance errors
-        stance_x_error = jnp.abs(left_foot_pos[..., 0] - right_foot_pos[..., 0])
-        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[..., 1] - right_foot_pos[..., 1]) - self.stance_width)
-        stance_error = jnp.where(zero_cmd_mask, stance_x_error + stance_y_error, 0.0)**2 # ^2 to make less sensitive to small errors, smooth kernel
-
-        return jnp.exp(-stance_error / self.error_scale)
+        reward = jnp.where(zero_cmd_mask, reward, 0.0)
+        return reward
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetContactObservation(ksim.FeetContactObservation):
@@ -653,7 +642,7 @@ class AngularVelocityCommand(ksim.Command):
         # can also use this method for roll and pitch cmd.
 
         # get init heading rz
-        init_quat = physics_data.xquat[1]
+        init_quat = physics_data.xquat[..., 1, :]
         init_euler = xax.quat_to_euler(init_quat)
         init_rz = init_euler[..., 2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
         init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
@@ -1030,16 +1019,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            # ksim.PushEvent(
-            #     x_force=1.0,
-            #     y_force=1.0,
-            #     z_force=0.3,
-            #     force_range=(0.2, 0.8),
-            #     x_angular_force=0.4,
-            #     y_angular_force=0.4,
-            #     z_angular_force=0.4,
-            #     interval_range=(4.0, 6.0),
-            # ),
+            ksim.PushEvent(
+                x_force=0.5,
+                y_force=0.5,
+                z_force=0.3,
+                force_range=(0.2, 0.8),
+                x_angular_force=0.0, # 0.4
+                y_angular_force=0.0,
+                z_angular_force=0.0,
+                interval_range=(4.0, 6.0),
+            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -1106,36 +1095,36 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            # LinearVelocityCommand(
-            #     x_range=(-0.3, 0.8),
-            #     y_range=(-0.3, 0.3),
-            #     x_zero_prob=0.5,
-            #     y_zero_prob=0.5,
-            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            #     min_magnitude=self.config.stand_still_threshold,
-            # ),
             LinearVelocityCommand(
                 x_range=(-0.3, 0.8),
                 y_range=(-0.3, 0.3),
-                x_zero_prob=1.0,
-                y_zero_prob=1.0,
+                x_zero_prob=0.5,
+                y_zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-                min_magnitude=self.config.stand_still_threshold,
+                min_magnitude=0.1,
             ),
+            AngularVelocityCommand(
+                scale=0.5,
+                zero_prob=0.9,
+                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+                min_magnitude=0.1,
+                ctrl_dt=self.config.ctrl_dt,
+            ),
+            # LinearVelocityCommand(
+            #     x_range=(-0.3, 0.8),
+            #     y_range=(-0.3, 0.3),
+            #     x_zero_prob=1.0,
+            #     y_zero_prob=1.0,
+            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            #     min_magnitude=self.config.stand_still_threshold,
+            # ),
             # AngularVelocityCommand(
             #     scale=0.5,
-            #     zero_prob=0.9,
+            #     zero_prob=1.0,
             #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
             #     min_magnitude=self.config.stand_still_threshold,
             #     ctrl_dt=self.config.ctrl_dt,
             # ),
-            AngularVelocityCommand(
-                scale=0.5,
-                zero_prob=1.0,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-                min_magnitude=self.config.stand_still_threshold,
-                ctrl_dt=self.config.ctrl_dt,
-            ),
             BaseHeightCommand(
                 min_height=0.7,
                 max_height=1.0,
@@ -1151,17 +1140,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # cmd
-            LinearVelocityTrackingReward(scale=1.0, error_scale=0.1),
-            AngularVelocityTrackingReward(scale=1.0, error_scale=0.05),
-            XYOrientationReward(scale=1.0, error_scale=0.025),
-            BaseHeightReward(scale=1.0, error_scale=0.05),
+            LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
+            AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
+            XYOrientationReward(scale=0.2, error_scale=0.03),
+            BaseHeightReward(scale=0.05, error_scale=0.05),
             # shaping
-            # SingleFootContactReward(scale=0.3),
-            # FeetAirtimeReward(scale=3.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
-            FeetPositionReward(scale=0.2, error_scale=0.05, stance_width=0.3),
+            SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
+            # FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.1), # TODO best to have this in joint space vs pos space. looks like it is.
+            # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
+            # BentArmPenalty.create_penalty(physics_model, scale=-0.02),
 
         
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
