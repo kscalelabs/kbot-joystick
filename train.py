@@ -66,7 +66,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc_gyro: bool = xax.field(
+    use_acc: bool = xax.field(
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
@@ -902,14 +902,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=1.0,
-                y_force=1.0,
-                z_force=0.3,
-                force_range=(0.3, 1.5),
-                x_angular_force=0.7,
-                y_angular_force=0.7,
-                z_angular_force=0.7,
-                interval_range=(0.5, 4.0),
+                x_linvel=1.0,
+                y_linvel=1.0,
+                z_linvel=0.3,
+                vel_range=(0.3, 1.5),
+                x_angvel=0.7,
+                y_angvel=0.7,
+                z_angvel=0.7,
+                interval_range=(3.0, 8.0),
             ),
         ]
 
@@ -1022,7 +1022,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
-            FeetPhaseReward(scale=1.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            # FeetPhaseReward(scale=1.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
@@ -1055,8 +1055,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # timestep phase + joint pos / vel + proj_grav
         num_actor_obs = 4 + num_joints * 2 + 3
 
-        if self.config.use_acc_gyro:
-            num_actor_obs += 6
+        if self.config.use_acc:
+            num_actor_obs += 3
 
         num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
@@ -1076,8 +1076,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 3  # imu_acc/gyro (privileged copies)
         )
 
-        if self.config.use_acc_gyro:
-            num_critic_inputs -= 6
+        if self.config.use_acc:
+            num_critic_inputs -= 3
 
         return Model(
             key,
@@ -1104,7 +1104,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
+        # imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
         gait_freq_cmd_1 = commands["gait_frequency_command"]
@@ -1118,10 +1118,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ang_vel_cmd,  # 1
             gait_freq_cmd_1,  # 1
         ]
-        if self.config.use_acc_gyro:
+        if self.config.use_acc:
             obs += [
                 imu_acc_3,  # 3
-                imu_gyro_3,  # 3
+                # imu_gyro_3,  # 3
             ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
