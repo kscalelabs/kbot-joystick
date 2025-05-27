@@ -722,7 +722,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
+            AnkleKneePenalty.create_penalty(physics_model, scale=-0.05),
             # FeetPhaseReward(scale=1.0, max_foot_height=0.18),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
