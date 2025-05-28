@@ -449,10 +449,11 @@ class BaseHeightReward(ksim.Reward):
     """Reward for keeping the base height at the commanded height."""
 
     error_scale: float = attrs.field(default=0.25)
+    standard_height: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_height = trajectory.xpos[..., 1, 2] # 1st body, because world is 0. 2nd element is z.
-        commanded_height = trajectory.command["base_height_command"][..., 0]
+        commanded_height = trajectory.command["base_height_command"][..., 0] + self.standard_height
         
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
@@ -736,26 +737,28 @@ class LinearVelocityCommand(ksim.Command):
 class BaseHeightCommand(ksim.Command):
     """Command to set the base height.
     
-    Samples heights uniformly between min_height and max_height with a configurable
-    switch probability. Otherwise keeps the previous height.
+    Samples height offset uniformly between delta_min and delta_plus with a configurable
+    switch probability. When zero probability is triggered, uses standard_height.
     """
 
-    min_height: float = attrs.field()
-    max_height: float = attrs.field()
+    lower_delta: float = attrs.field()
+    higher_delta: float = attrs.field()
+    zero_prob: float = attrs.field(default=0.0)
     switch_prob: float = attrs.field(default=0.0)
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b = jax.random.split(rng)
-        height = jax.random.uniform(rng_b, (1,), minval=self.min_height, maxval=self.max_height)
-        return height
+        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
+        delta = jax.random.uniform(rng_b, (1,), minval=self.lower_delta, maxval=self.higher_delta)
+        return jnp.where(zero_mask, jnp.zeros_like(delta), delta)
 
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_height = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_height, prev_command)
+        new_delta = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_delta, prev_command)
 
 
 @attrs.define(frozen=True)
@@ -1126,8 +1129,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             #     ctrl_dt=self.config.ctrl_dt,
             # ),
             BaseHeightCommand(
-                min_height=0.7,
-                max_height=1.0,
+                lower_delta=-0.3,
+                higher_delta=0.0,
+                zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 3, 
             ),
             XYOrientationCommand(
@@ -1143,7 +1147,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.05, error_scale=0.05), # TODO fix 0 value
+            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=1.0), # TODO fix 0 value
             # shaping
             SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
             # FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
@@ -1260,7 +1264,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ang_vel_cmd[..., :-1],
             jnp.zeros_like(ang_vel_cmd[..., -1:]),
 
-            (base_height_cmd-0.85),  # 1
+            base_height_cmd,  # 1
             base_xy_orient_cmd,  # 2
         ]
         if self.config.use_acc_gyro:
@@ -1316,7 +1320,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ang_vel_cmd[..., :-1],
                 jnp.zeros_like(ang_vel_cmd[..., -1:]),
 
-                (base_height_cmd-0.85),
+                base_height_cmd,
                 base_xy_orient_cmd,
                 imu_acc_3, # m/s^2
                 imu_gyro_3, # rad/s
