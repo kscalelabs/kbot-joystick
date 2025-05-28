@@ -390,7 +390,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
             jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
         )
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
-        error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
+        error = jnp.where(zero_cmd_mask, vel_error, 2*jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
 
 
@@ -403,7 +403,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[..., 1, :])[:, 2]
-        base_yaw_cmd = trajectory.command[self.command_name][..., 2]
+        base_yaw_cmd = trajectory.command[self.command_name][..., -1]
 
         base_yaw_quat = xax.euler_to_quat(jnp.stack([
             jnp.zeros_like(base_yaw_cmd),
@@ -1143,7 +1143,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.05, error_scale=0.05),
+            BaseHeightReward(scale=0.05, error_scale=0.05), # TODO fix 0 value
             # shaping
             SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
             # FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
