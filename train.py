@@ -184,7 +184,7 @@ class SimpleSingleFootContactReward(ksim.Reward):
         ) & (
             jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
         )
-        reward = jnp.where(is_zero_cmd, 1.0, reward)
+        reward = jnp.where(is_zero_cmd, 1.0, single)
         return reward
 
 
