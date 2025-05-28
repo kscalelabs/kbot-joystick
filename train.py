@@ -166,6 +166,29 @@ class FeetSlipPenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class SimpleSingleFootContactReward(ksim.Reward):
+    """Reward that encourages a single-foot contact pattern during locomotion."""
+    
+    scale: float = 1.0
+    feet_contact_obs_name: str = "feet_contact_observation"
+    ctrl_dt: float = 0.02
+    
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        contact = traj.obs[self.feet_contact_obs_name]
+        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
+        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+        single = jnp.logical_xor(left, right)
+
+        is_zero_cmd = (
+            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
+        ) & (
+            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+        )
+        reward = jnp.where(is_zero_cmd, 1.0, reward)
+        return reward
+
+
+@attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.Reward):
     # TODO regard dones
     """Reward that encourages a single-foot contact pattern during locomotion.
@@ -1149,7 +1172,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=1.0), # TODO fix 0 value
             # shaping
-            SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
+            SimpleSingleFootContactReward(scale=0.1),
+            # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
             # FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
