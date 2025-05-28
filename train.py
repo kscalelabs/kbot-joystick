@@ -1064,12 +1064,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
-            ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.JointJerkPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.LinkAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.LinkJerkPenalty(scale=-0.001, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             # Bespoke rewards.
@@ -1084,7 +1084,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
             AlternatingSingleFootReward(scale=2.1),
-            FeetAirtimeReward(scale=0.1, touchdown_penalty=0.1),
+            FeetAirtimeReward(scale=1.0, touchdown_penalty=0.1),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
