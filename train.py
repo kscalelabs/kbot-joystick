@@ -739,12 +739,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum(
-            num_levels=self.config.num_curriculum_levels,
-            increase_threshold=self.config.increase_threshold,
-            decrease_threshold=self.config.decrease_threshold,
-            min_level_steps=self.config.min_level_steps,
-            min_level=0.01,
+        # return ksim.EpisodeLengthCurriculum(
+        #     num_levels=self.config.num_curriculum_levels,
+        #     increase_threshold=self.config.increase_threshold,
+        #     decrease_threshold=self.config.decrease_threshold,
+        #     min_level_steps=self.config.min_level_steps,
+        #     min_level=0.01,
+        # )
+        return ksim.LinearCurriculum(
+            step_size=0.01,
+            step_every_n_epochs=5,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
@@ -976,9 +980,9 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.003, 0.005),  # Simulate 3-5ms of latency.
+            action_latency_range=(0.001, 0.003),  # Simulate 1-3ms of latency.
             actuator_update_dt=0.01,
-            drop_action_prob=0.05,  # Drop 5% of commands.
+            drop_action_prob=0.01,  # Drop 1% of commands.
             # Visualization parameters.
             render_track_body_id=0,
             render_markers=True,
