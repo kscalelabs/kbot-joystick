@@ -455,17 +455,20 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
     command_name: str = attrs.field(default="linear_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
     stand_still_threshold: float = attrs.field(default=0.0)
+    in_robot_frame: bool = attrs.field(default=True)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
         command = trajectory.command[self.command_name]
-        lin_vel_error = xax.get_norm(command - trajectory.obs[self.linvel_obs_name][..., :2], self.norm).sum(axis=-1)
+        qvel = trajectory.qvel[..., :6]
+        linvel = qvel[..., :3]
+
+        if self.in_robot_frame:
+            linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
+
+        lin_vel_error = xax.get_norm(command - linvel, self.norm).sum(axis=-1)
         reward_value = jnp.exp(-lin_vel_error / self.error_scale)
 
         command_norm = jnp.linalg.norm(command, axis=-1)
@@ -479,17 +482,16 @@ class AngularVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the angular velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    angvel_obs_name: str = attrs.field(default="sensor_observation_base_site_angvel")
     command_name: str = attrs.field(default="angular_velocity_command")
     norm: xax.NormType = attrs.field(default="l2")
     stand_still_threshold: float = attrs.field(default=0.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        if self.angvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.angvel_obs_name} not found; add it as an observation in your task.")
-
         command = trajectory.command[self.command_name]
-        ang_vel_error = jnp.square(command.flatten() - trajectory.obs[self.angvel_obs_name][..., 2])
+        qvel = trajectory.qvel[..., :6]
+        angvel = qvel[..., 3:]
+
+        ang_vel_error = xax.get_norm(command - angvel, self.norm).sum(axis=-1)
         reward_value = jnp.exp(-ang_vel_error / self.error_scale)
 
         command_norm = jnp.linalg.norm(command, axis=-1)
@@ -1057,6 +1059,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(
                 scale=1.5,
                 stand_still_threshold=self.config.stand_still_threshold,
+                in_robot_frame=True,
             ),
             AngularVelocityTrackingReward(
                 scale=1.0,
