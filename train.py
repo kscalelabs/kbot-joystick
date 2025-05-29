@@ -149,7 +149,7 @@ class ContactForcePenalty(ksim.Reward):
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         forces = jnp.stack([traj.obs[n] for n in self.sensor_names], axis=-1)
-        cost = jnp.clip(jnp.abs(forces[..., 2, :]) - self.max_contact_force, 0)
+        cost = jnp.clip(jnp.abs(forces[:, 2, :]) - self.max_contact_force, 0)
         return jnp.sum(cost, axis=-1)
 
 
@@ -160,7 +160,7 @@ class FeetSlipPenalty(ksim.Reward):
     scale: float = -1.0
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][..., :2], axis=-1, keepdims=True)
+        vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][:, :2], axis=-1, keepdims=True)
         contact = traj.obs["feet_contact_observation"]
         return jnp.sum(vel * contact, axis=-1)
 
@@ -175,14 +175,14 @@ class SimpleSingleFootContactReward(ksim.Reward):
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
-        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
-        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
+        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
         single = jnp.logical_xor(left, right)
 
         is_zero_cmd = (
             jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
-            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
         )
         reward = jnp.where(is_zero_cmd, 1.0, single)
         return reward
@@ -216,12 +216,12 @@ class SingleFootContactReward(ksim.Reward):
         • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
         """
         contact = traj.obs["feet_contact_observation"]
-        left = jnp.any(contact[..., :2] > 0.5, axis=-1)
-        right = jnp.any(contact[..., 2:] > 0.5, axis=-1)
+        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
+        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
         single = jnp.logical_xor(left, right)
 
         k = int(self.window_size / self.ctrl_dt)
-        padded = jnp.concatenate([jnp.zeros_like(single[..., :k]), single], axis=-1)
+        padded = jnp.concatenate([jnp.zeros_like(single[:, :k]), single], axis=-1)
         window_any = (
             jax.lax.reduce_window(
                 padded.astype(jnp.int32),
@@ -238,7 +238,7 @@ class SingleFootContactReward(ksim.Reward):
         is_zero_cmd = (
             jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
-            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
         )
         reward = jnp.where(is_zero_cmd, 1.0, reward)
         return reward
@@ -273,7 +273,7 @@ class FeetAirtimeReward(ksim.Reward):
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
-        left_in, right_in = contact[..., 0] > 0.5, contact[..., 1] > 0.5
+        left_in, right_in = contact[:, 0] > 0.5, contact[:, 1] > 0.5
 
         # airtime counters
         left_air = self._airtime_sequence(left_in)
@@ -293,7 +293,7 @@ class FeetAirtimeReward(ksim.Reward):
         is_zero_cmd = (
             jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
-            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
         )
 
         return jnp.where(is_zero_cmd, 0.0, swing_reward)
@@ -393,24 +393,24 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
         # get base quat, only yaw.
         # careful to only rotate in z, disregard rx and ry, bad conflict with roll and pitch.
-        base_euler = xax.quat_to_euler(trajectory.xquat[..., 1, :])
-        base_euler = base_euler.at[..., 0].set(0.0)
-        base_euler = base_euler.at[..., 1].set(0.0)
+        base_euler = xax.quat_to_euler(trajectory.xquat[:, 1, :])
+        base_euler = base_euler.at[:, 0].set(0.0)
+        base_euler = base_euler.at[:, 1].set(0.0)
         base_z_quat = xax.euler_to_quat(base_euler)
 
         # rotate local frame commands to global frame
-        robot_vel_cmd = jnp.zeros_like(global_vel).at[..., :2].set(trajectory.command[self.command_name])
+        robot_vel_cmd = jnp.zeros_like(global_vel).at[:, :2].set(trajectory.command[self.command_name])
         global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
 
         # drop vz. vz conflicts with base height reward.
-        global_vel_xy_cmd = global_vel_cmd[..., :2]
-        global_vel_xy = global_vel[..., :2]
+        global_vel_xy_cmd = global_vel_cmd[:, :2]
+        global_vel_xy = global_vel[:, :2]
 
         # now compute error. special trick: different kernels for standing and walking.
         zero_cmd_mask = (
             jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
-            jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
+            jnp.abs(trajectory.command["angular_velocity_command"][:, 0]) < 1e-3
         )
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, 2*jnp.square(vel_error))
@@ -425,8 +425,8 @@ class AngularVelocityTrackingReward(ksim.Reward):
     command_name: str = attrs.field(default="angular_velocity_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        base_yaw = xax.quat_to_euler(trajectory.xquat[..., 1, :])[:, 2]
-        base_yaw_cmd = trajectory.command[self.command_name][..., -1]
+        base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
+        base_yaw_cmd = trajectory.command[self.command_name][:, -1]
 
         base_yaw_quat = xax.euler_to_quat(jnp.stack([
             jnp.zeros_like(base_yaw_cmd),
@@ -452,14 +452,14 @@ class XYOrientationReward(ksim.Reward):
     command_name: str = attrs.field(default="xyorientation_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        euler_orientation = xax.quat_to_euler(trajectory.xquat[..., 1, :])
-        euler_orientation = euler_orientation.at[..., 2].set(0.0)  # ignore yaw
+        euler_orientation = xax.quat_to_euler(trajectory.xquat[:, 1, :])
+        euler_orientation = euler_orientation.at[:, 2].set(0.0)  # ignore yaw
         base_xy_quat = xax.euler_to_quat(euler_orientation)
 
         commanded_euler = jnp.stack([
-            trajectory.command[self.command_name][..., 0],
-            trajectory.command[self.command_name][..., 1],
-            jnp.zeros_like(trajectory.command[self.command_name][..., 0])
+            trajectory.command[self.command_name][:, 0],
+            trajectory.command[self.command_name][:, 1],
+            jnp.zeros_like(trajectory.command[self.command_name][:, 0])
         ], axis=-1)
         base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
 
@@ -475,8 +475,8 @@ class BaseHeightReward(ksim.Reward):
     standard_height: float = attrs.field(default=1.0)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        current_height = trajectory.xpos[..., 1, 2] # 1st body, because world is 0. 2nd element is z.
-        commanded_height = trajectory.command["base_height_command"][..., 0] + self.standard_height
+        current_height = trajectory.xpos[:, 1, 2] # 1st body, because world is 0. 2nd element is z.
+        commanded_height = trajectory.command["base_height_command"][:, 0] + self.standard_height
         
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
@@ -490,12 +490,12 @@ class FeetPositionReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         feet_pos = trajectory.obs["feet_position_observation"]
-        left_foot_pos = feet_pos[..., :3]  
-        right_foot_pos = feet_pos[..., 3:]
+        left_foot_pos = feet_pos[:, :3]  
+        right_foot_pos = feet_pos[:, 3:]
 
         # Calculate stance errors
-        stance_x_error = jnp.abs(left_foot_pos[..., 0] - right_foot_pos[..., 0])
-        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[..., 1] - right_foot_pos[..., 1]) - self.stance_width)
+        stance_x_error = jnp.abs(left_foot_pos[:, 0] - right_foot_pos[:, 0])
+        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[:, 1] - right_foot_pos[:, 1]) - self.stance_width)
         stance_error = stance_x_error + stance_y_error
         reward = jnp.exp(-stance_error / self.error_scale)
 
@@ -503,7 +503,7 @@ class FeetPositionReward(ksim.Reward):
         zero_cmd_mask = (
             jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
         ) & (
-            jnp.abs(trajectory.command["angular_velocity_command"][..., 0]) < 1e-3
+            jnp.abs(trajectory.command["angular_velocity_command"][:, 0]) < 1e-3
         )
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
@@ -666,14 +666,14 @@ class AngularVelocityCommand(ksim.Command):
         # can also use this method for roll and pitch cmd.
 
         # get init heading rz
-        init_quat = physics_data.xquat[..., 1, :]
+        init_quat = physics_data.xquat[1]
         init_euler = xax.quat_to_euler(init_quat)
-        init_rz = init_euler[..., 2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
+        init_rz = init_euler[2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
         init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
 
         # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
         # TODO temp heading obs, no noise for now. need solution.
-        heading_obs = physics_data.xquat[..., 1, :]
+        heading_obs = physics_data.xquat[1]
         
         # Rotate heading_obs by inverse of init_rz_quat to spin it back
         heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
