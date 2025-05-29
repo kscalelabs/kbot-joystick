@@ -10,6 +10,7 @@ import ksim
 from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
+from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
@@ -48,6 +49,12 @@ def main() -> None:
     carry_shape = (task.config.depth, task.config.hidden_size)
     num_joints = len(joint_names)
     num_commands = 7  # joystick command
+
+    metadata = PyModelMetadata(
+        joint_names=joint_names,
+        num_commands=num_commands,
+        carry_size=carry_shape,
+    )
 
     @jax.jit
     def init_fn() -> Array:
@@ -98,24 +105,18 @@ def main() -> None:
 
     init_onnx = export_fn(
         model=init_fn,
-        num_joints=num_joints,
-        num_commands=num_commands,
-        carry_shape=carry_shape,
+        metadata=metadata,
     )
 
     step_onnx = export_fn(
         model=step_fn,
-        num_joints=num_joints,
-        num_commands=num_commands,
-        carry_shape=carry_shape,
+        metadata=metadata,
     )
 
     kinfer_model = pack(
         init_fn=init_onnx,
         step_fn=step_onnx,
-        joint_names=joint_names,
-        carry_shape=carry_shape,
-        num_commands=num_commands,
+        metadata=metadata,
     )
 
     # Saves the resulting model.

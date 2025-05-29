@@ -44,6 +44,50 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_ankle_02", math.radians(-30.0), 1.0),
 ]
 
+BIASES: list[tuple[str, float]] = [
+    ("dof_right_shoulder_pitch_03_position", 0.0),
+    ("dof_right_shoulder_roll_03_position", math.radians(-10.0)),
+    ("dof_right_shoulder_yaw_02_position", 0.0),
+    ("dof_right_elbow_02_position", math.radians(90.0)),
+    ("dof_right_wrist_00_position", 0.0),
+    ("dof_left_shoulder_pitch_03_position", 0.0),
+    ("dof_left_shoulder_roll_03_position", math.radians(10.0)),
+    ("dof_left_shoulder_yaw_02_position", 0.0),
+    ("dof_left_elbow_02_position", math.radians(-90.0)),
+    ("dof_left_wrist_00_position", 0.0),
+    ("dof_right_hip_pitch_04_position", math.radians(-20.0)),
+    ("dof_right_hip_roll_03_position", math.radians(-0.0)),
+    ("dof_right_hip_yaw_03_position", 0.0),
+    ("dof_right_knee_04_position", math.radians(-50.0)),
+    ("dof_right_ankle_02_position", math.radians(30.0)),
+    ("dof_left_hip_pitch_04_position", math.radians(20.0)),
+    ("dof_left_hip_roll_03_position", math.radians(0.0)),
+    ("dof_left_hip_yaw_03_position", 0.0),
+    ("dof_left_knee_04_position", math.radians(50.0)),
+    ("dof_left_ankle_02_position", math.radians(-30.0)),
+    # Velocities.
+    # ("dof_right_shoulder_pitch_03_velocity", 0.0),
+    # ("dof_right_shoulder_roll_03_velocity", 0.0),
+    # ("dof_right_shoulder_yaw_02_velocity", 0.0),
+    # ("dof_right_elbow_02_velocity", 0.0),
+    # ("dof_right_wrist_00_velocity", 0.0),
+    # ("dof_left_shoulder_pitch_03_velocity", 0.0),
+    # ("dof_left_shoulder_roll_03_velocity", 0.0),
+    # ("dof_left_shoulder_yaw_02_velocity", 0.0),
+    # ("dof_left_elbow_02_velocity", 0.0),
+    # ("dof_left_wrist_00_velocity", 0.0),
+    # ("dof_right_hip_pitch_04_velocity", 0.0),
+    # ("dof_right_hip_roll_03_velocity", 0.0),
+    # ("dof_right_hip_yaw_03_velocity", 0.0),
+    # ("dof_right_knee_04_velocity", 0.0),
+    # ("dof_right_ankle_02_velocity", 0.0),
+    # ("dof_left_hip_pitch_04_velocity", 0.0),
+    # ("dof_left_hip_roll_03_velocity", 0.0),
+    # ("dof_left_hip_yaw_03_velocity", 0.0),
+    # ("dof_left_knee_04_velocity", 0.0),
+    # ("dof_left_ankle_02_velocity", 0.0),
+]
+
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
@@ -449,7 +493,7 @@ class Actor(eqx.Module):
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means.
-        mean_nm = mean_nm + jnp.array([v for _, v, _ in ZEROS])[:, None]
+        mean_nm = mean_nm + jnp.array([v for _, v in BIASES])[:, None]
 
         dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
 
@@ -589,6 +633,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             action_noise=math.radians(5),
             action_noise_type="gaussian",
         )
+        # return ksim.PositionVelocityActuator(
+        #     physics_model=physics_model,
+        #     metadata=metadata,
+        #     pos_action_noise=math.radians(5),
+        #     pos_action_noise_type="gaussian",
+        # )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
@@ -612,11 +662,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 y_angvel=0.8,
                 z_angvel=0.8,
                 vel_range=(0.5, 1.5),
-                interval_range=(2.0, 4.0),
+                interval_range=(8.0, 20.0),
             ),
+            # ksim.PushEvent(
+            #     x_force=1.0,
+            #     y_force=1.0,
+            #     z_force=0.75,
+            #     x_angular_force=0.8,
+            #     y_angular_force=0.8,
+            #     z_angular_force=0.8,
+            #     force_range=(0.5, 1.5),
+            #     interval_range=(2.0, 4.0),
+            # ),
             ksim.JumpEvent(
                 jump_height_range=(0.0, 0.3),
-                interval_range=(3.0, 15.0),
+                interval_range=(8.0, 20.0),
             ),
         ]
 
@@ -645,8 +705,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.01),
-                noise=0.1,
+                lag_range=(0.0, 0.1),
+                noise=0.3,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -709,16 +769,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.UprightReward(scale=2.5),
             ksim.BaseHeightReward(height_target=1.05, scale=1.0),
             # Normalisation penalties.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
-            ksim.JointAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.JointVelocityPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.JointJerkPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.LinkAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.LinkJerkPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.005, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.005, scale_by_curriculum=True),
+            ksim.JointVelocityPenalty(scale=-0.005, scale_by_curriculum=True),
+            ksim.JointJerkPenalty(scale=-0.005, scale_by_curriculum=True),
+            ksim.LinkAccelerationPenalty(scale=-0.005, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.005, scale_by_curriculum=True),
+            ksim.LinkJerkPenalty(scale=-0.005, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.5, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
-            ksim.CtrlPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.CtrlPenalty(scale=-0.005, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
@@ -784,7 +844,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return Model(
             key,
             num_actor_inputs=num_actor_inputs,
-            num_actor_outputs=len(ZEROS),
+        num_actor_outputs=len(BIASES),
             num_critic_inputs=num_critic_inputs,
             min_std=0.01,
             max_std=1.0,
@@ -980,8 +1040,8 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.001, 0.003),  # Simulate 1-3ms of latency.
-            actuator_update_dt=0.01,
+            action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
+            actuator_update_dt=0.005,
             drop_action_prob=0.01,  # Drop 1% of commands.
             # Visualization parameters.
             render_track_body_id=0,
