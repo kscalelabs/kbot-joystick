@@ -170,14 +170,25 @@ class SimpleSingleFootContactReward(ksim.Reward):
     """Reward that encourages a single-foot contact pattern during locomotion."""
     
     scale: float = 1.0
-    feet_contact_obs_name: str = "feet_contact_observation"
+    # feet_contact_obs_name: str = "feet_contact_observation"
+    left_foot_force_obs_name: str = "sensor_observation_left_foot_force"
+    right_foot_force_obs_name: str = "sensor_observation_right_foot_force"
     ctrl_dt: float = 0.02
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        contact = traj.obs[self.feet_contact_obs_name]
-        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
-        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
-        single = jnp.logical_xor(left, right)
+        # force based
+        left_force = traj.obs[self.left_foot_force_obs_name]
+        right_force = traj.obs[self.right_foot_force_obs_name]
+
+        left_force_norm = jnp.linalg.norm(left_force, axis=-1)
+        right_force_norm = jnp.linalg.norm(right_force, axis=-1)
+        single = jnp.logical_xor(left_force_norm > 0.1, right_force_norm > 0.1)
+        
+        # collision based
+        # contact = traj.obs[self.feet_contact_obs_name]
+        # left = jnp.any(contact[:, :2] > 0.5, axis=-1)
+        # right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
+        # single = jnp.logical_xor(left, right)
 
         is_zero_cmd = (
             jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
@@ -394,8 +405,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         # get base quat, only yaw.
         # careful to only rotate in z, disregard rx and ry, bad conflict with roll and pitch.
         base_euler = xax.quat_to_euler(trajectory.xquat[:, 1, :])
-        base_euler = base_euler.at[:, 0].set(0.0)
-        base_euler = base_euler.at[:, 1].set(0.0)
+        base_euler = base_euler.at[:, :2].set(0.0)
         base_z_quat = xax.euler_to_quat(base_euler)
 
         # rotate local frame commands to global frame
@@ -1170,7 +1180,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=1.0), # TODO fix 0 value
+            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
