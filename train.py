@@ -1055,7 +1055,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=0.5),
             LinearVelocityTrackingReward(
-                scale=1.0,
+                scale=1.5,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
             AngularVelocityTrackingReward(
@@ -1076,15 +1076,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
-            # FeetPhaseReward(scale=1.5, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
             StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
-            AlternatingSingleFootReward(scale=2.1),
-            FeetAirtimeReward(scale=1.0, touchdown_penalty=0.1),
+            # AlternatingSingleFootReward(scale=2.1),
+            FeetAirtimeReward(scale=1.0, touchdown_penalty=0.01),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
