@@ -170,25 +170,25 @@ class SimpleSingleFootContactReward(ksim.Reward):
     """Reward that encourages a single-foot contact pattern during locomotion."""
     
     scale: float = 1.0
-    # feet_contact_obs_name: str = "feet_contact_observation"
-    left_foot_force_obs_name: str = "sensor_observation_left_foot_force"
-    right_foot_force_obs_name: str = "sensor_observation_right_foot_force"
+    feet_contact_obs_name: str = "feet_contact_observation"
+    # left_foot_force_obs_name: str = "sensor_observation_left_foot_force"
+    # right_foot_force_obs_name: str = "sensor_observation_right_foot_force"
     ctrl_dt: float = 0.02
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        # force based
-        left_force = traj.obs[self.left_foot_force_obs_name]
-        right_force = traj.obs[self.right_foot_force_obs_name]
+        # # force based, doesnt work, wrong force
+        # left_force = traj.obs[self.left_foot_force_obs_name]
+        # right_force = traj.obs[self.right_foot_force_obs_name]
 
-        left_force_norm = jnp.linalg.norm(left_force, axis=-1)
-        right_force_norm = jnp.linalg.norm(right_force, axis=-1)
-        single = jnp.logical_xor(left_force_norm > 0.1, right_force_norm > 0.1)
+        # left_force_norm = jnp.linalg.norm(left_force, axis=-1)
+        # right_force_norm = jnp.linalg.norm(right_force, axis=-1)
+        # single = jnp.logical_xor(left_force_norm > 0.1, right_force_norm > 0.1)
         
         # collision based
-        # contact = traj.obs[self.feet_contact_obs_name]
-        # left = jnp.any(contact[:, :2] > 0.5, axis=-1)
-        # right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
-        # single = jnp.logical_xor(left, right)
+        contact = traj.obs[self.feet_contact_obs_name]
+        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
+        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
+        single = jnp.logical_xor(left, right)
 
         is_zero_cmd = (
             jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
@@ -1132,15 +1132,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             LinearVelocityCommand(
-                x_range=(-0.3, 0.8),
-                y_range=(-0.3, 0.3),
+                x_range=(-0.5, 2.0), # m/s
+                y_range=(-0.5, 0.5), # m/s
                 x_zero_prob=0.5,
                 y_zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=0.1,
             ),
             AngularVelocityCommand(
-                scale=0.5,
+                scale=0.5, # rad/s
                 zero_prob=0.9,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
                 min_magnitude=0.1,
@@ -1162,13 +1162,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             #     ctrl_dt=self.config.ctrl_dt,
             # ),
             BaseHeightCommand(
-                lower_delta=-0.3,
-                higher_delta=0.0,
+                lower_delta=-0.3, # m
+                higher_delta=0.1, # m
                 zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 3, 
             ),
             XYOrientationCommand(
-                range=0.05*math.pi,
+                range=0.3, # +/- rad
                 zero_prob=0.85,
                 switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
             ),
