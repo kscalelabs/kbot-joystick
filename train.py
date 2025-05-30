@@ -167,24 +167,12 @@ class FeetSlipPenalty(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class SimpleSingleFootContactReward(ksim.Reward):
-    """Reward that encourages a single-foot contact pattern during locomotion."""
+    """Reward having one and only one foot in contact with the ground, while walking."""
     
     scale: float = 1.0
     feet_contact_obs_name: str = "feet_contact_observation"
-    # left_foot_force_obs_name: str = "sensor_observation_left_foot_force"
-    # right_foot_force_obs_name: str = "sensor_observation_right_foot_force"
-    ctrl_dt: float = 0.02
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        # # force based, doesnt work, wrong force
-        # left_force = traj.obs[self.left_foot_force_obs_name]
-        # right_force = traj.obs[self.right_foot_force_obs_name]
-
-        # left_force_norm = jnp.linalg.norm(left_force, axis=-1)
-        # right_force_norm = jnp.linalg.norm(right_force, axis=-1)
-        # single = jnp.logical_xor(left_force_norm > 0.1, right_force_norm > 0.1)
-        
-        # collision based
         contact = traj.obs[self.feet_contact_obs_name]
         left = jnp.any(contact[:, :2] > 0.5, axis=-1)
         right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
@@ -257,14 +245,8 @@ class SingleFootContactReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.Reward):
-    # TODO regard dones
-    """Encourages reasonable step frequency by rewarding foot airtime.
-
-    Each foot accumulates a *positive* reward proportional to the duration it
-    spends in the air (i.e. not in contact).  Whenever the foot touches the
-    ground a small fixed penalty (``touchdown_penalty``) is applied.  This leads
-    to larger rewards for longer swing phases while discouraging excessively
-    rapid stepping.
+    """Encourages reasonable step frequency by rewarding long swing 
+    phases and penalising quick stepping.
     """
 
     scale: float = 1.0
@@ -272,11 +254,11 @@ class FeetAirtimeReward(ksim.Reward):
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
 
-    def _airtime_sequence(self, contact_bool: Array) -> Array:
+    def _airtime_sequence(self, contact_bool: Array, dones: Array) -> Array:
         """Returns an array with the airtime (in seconds) for each timestep."""
 
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
-            new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
+            new_time = jnp.where(is_contact | dones, 0.0, time_since_liftoff + self.ctrl_dt)
             return new_time, new_time
 
         _, airtime = jax.lax.scan(_body, 0.0, contact_bool)
@@ -284,19 +266,20 @@ class FeetAirtimeReward(ksim.Reward):
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
-        left_in, right_in = contact[:, 0] > 0.5, contact[:, 1] > 0.5
+        left_contact = jnp.any(contact[:, :2] > 0.5, axis=-1)
+        right_contact = jnp.any(contact[:, 2:] > 0.5, axis=-1)
 
         # airtime counters
-        left_air = self._airtime_sequence(left_in)
-        right_air = self._airtime_sequence(right_in)
+        left_air = self._airtime_sequence(left_contact)
+        right_air = self._airtime_sequence(right_contact)
 
         # touchdown boolean (0→1 transition)
         def touchdown(c: Array) -> Array:
             prev = jnp.concatenate([jnp.array([False]), c[:-1]])
             return jnp.logical_and(c, jnp.logical_not(prev))
 
-        td_l = jnp.roll(touchdown(left_in), shift=-1).at[-1].set(0)
-        td_r = jnp.roll(touchdown(right_in), shift=-1).at[-1].set(0)
+        td_l = touchdown(left_contact)
+        td_r = touchdown(right_contact)
 
         swing_reward = (left_air - self.touchdown_penalty) * td_l.astype(jnp.float32) + (right_air - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
@@ -770,7 +753,7 @@ class LinearVelocityCommand(ksim.Command):
 class BaseHeightCommand(ksim.Command):
     """Command to set the base height.
     
-    Samples height offset uniformly between delta_min and delta_plus with a configurable
+    Samples height offset uniformly between lower_delta and higher_delta with a configurable
     switch probability. When zero probability is triggered, uses standard_height.
     """
 
@@ -1184,7 +1167,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            # FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
