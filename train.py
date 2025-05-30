@@ -658,11 +658,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 x_linvel=1.0,
                 y_linvel=1.0,
                 z_linvel=0.75,
-                x_angvel=0.8,
-                y_angvel=0.8,
-                z_angvel=0.8,
+                x_angvel=4.0,
+                y_angvel=4.0,
+                z_angvel=4.0,
                 vel_range=(0.5, 1.5),
-                interval_range=(8.0, 20.0),
+                interval_range=(4.0, 8.0),
             ),
             # ksim.PushEvent(
             #     x_force=1.0,
@@ -782,7 +782,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
-            AnkleKneePenalty.create_penalty(physics_model, scale=-0.05),
+            AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             # FeetPhaseReward(scale=1.0, max_foot_height=0.18),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
