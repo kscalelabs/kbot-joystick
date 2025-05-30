@@ -33,12 +33,12 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
     ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 3.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
     ("dof_right_knee_04", math.radians(-50.0), 0.2),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
     ("dof_left_hip_pitch_04", math.radians(20.0), 0.01),
-    ("dof_left_hip_roll_03", math.radians(0.0), 2.0),
+    ("dof_left_hip_roll_03", math.radians(0.0), 3.0),
     ("dof_left_hip_yaw_03", 0.0, 2.0),
     ("dof_left_knee_04", math.radians(50.0), 0.2),
     ("dof_left_ankle_02", math.radians(-30.0), 1.0),
@@ -468,11 +468,13 @@ class LinearVelocityTrackingReward(ksim.Reward):
         if self.in_robot_frame:
             linvel = xax.rotate_vector_by_quat(linvel, trajectory.qpos[..., 3:7], inverse=True)
 
-        lin_vel_error = xax.get_norm(command - linvel, self.norm).sum(axis=-1)
+        xy_vel = linvel[..., :2]
+
+        lin_vel_error = xax.get_norm(command - xy_vel, self.norm).sum(axis=-1)
         reward_value = jnp.exp(-lin_vel_error / self.error_scale)
 
-        command_norm = jnp.linalg.norm(command, axis=-1)
-        reward_value *= command_norm > self.stand_still_threshold
+        # command_norm = jnp.linalg.norm(command, axis=-1)
+        # reward_value *= command_norm > self.stand_still_threshold
 
         return reward_value
 
@@ -494,8 +496,8 @@ class AngularVelocityTrackingReward(ksim.Reward):
         ang_vel_error = xax.get_norm(command - angvel, self.norm).sum(axis=-1)
         reward_value = jnp.exp(-ang_vel_error / self.error_scale)
 
-        command_norm = jnp.linalg.norm(command, axis=-1)
-        reward_value *= command_norm > self.stand_still_threshold
+        # command_norm = jnp.linalg.norm(command, axis=-1)
+        # reward_value *= command_norm > self.stand_still_threshold
 
         return reward_value
 
@@ -962,9 +964,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 y_linvel=1.0,
                 z_linvel=0.3,
                 vel_range=(0.3, 1.5),
-                x_angvel=0.7,
-                y_angvel=0.7,
-                z_angvel=0.7,
+                x_angvel=1.5,
+                y_angvel=1.5,
+                z_angvel=1.5,
                 interval_range=(3.0, 8.0),
             ),
         ]
@@ -1079,7 +1081,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
-            FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
