@@ -189,7 +189,7 @@ class SimpleSingleFootContactReward(ksim.Reward):
 
 @attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.Reward):
-    # TODO regard dones
+    # TODO stateful and dones
     """Reward that encourages a single-foot contact pattern during locomotion.
 
     The reward returns ``1`` whenever exactly one foot is in contact with the
@@ -263,12 +263,12 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
             new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
-            return new_time, new_time
+            return new_time[-1], new_time
 
         # or with done to reset the airtime counter when the episode is done
         contact_or_done = jnp.logical_or(contact_bool, done)
-        _, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
-        return airtime
+        carry, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
+        return carry, airtime
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         contact = traj.obs[self.feet_contact_obs_name]
@@ -276,10 +276,10 @@ class FeetAirtimeReward(ksim.StatefulReward):
         right_contact = jnp.any(contact[:, 2:] > 0.5, axis=-1)
 
         # airtime counters
-        left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
-        right_air = self._airtime_sequence(reward_carry[1], right_contact, traj.done)
+        left_carry, left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
+        right_carry, right_air = self._airtime_sequence(reward_carry[1], right_contact, traj.done)
 
-        reward_carry = jnp.array([left_air[-1], right_air[-1]])
+        reward_carry = jnp.array([left_carry, right_carry])
 
         # touchdown boolean (0→1 transition)
         def touchdown(c: Array) -> Array:
