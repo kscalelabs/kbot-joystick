@@ -17,7 +17,7 @@ import mujoco_scenes
 import mujoco_scenes.mjcf
 import optax
 import xax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray, PyTree
 
 # These are in the order of the neural network outputs.
 # Joint name, target position, penalty weight.
@@ -244,9 +244,9 @@ class SingleFootContactReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetAirtimeReward(ksim.Reward):
+class FeetAirtimeReward(ksim.StatefulReward):
     """Encourages reasonable step frequency by rewarding long swing 
-    phases and penalising quick stepping.
+    phases and penalizing quick stepping.
     """
 
     scale: float = 1.0
@@ -254,7 +254,11 @@ class FeetAirtimeReward(ksim.Reward):
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
 
-    def _airtime_sequence(self, contact_bool: Array, done: Array) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        # initial left and right airtime
+        return jnp.array([0.0, 0.0])
+
+    def _airtime_sequence(self, initial_airtime: Array, contact_bool: Array, done: Array) -> Array:
         """Returns an array with the airtime (in seconds) for each timestep."""
 
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
@@ -263,17 +267,19 @@ class FeetAirtimeReward(ksim.Reward):
 
         # or with done to reset the airtime counter when the episode is done
         contact_or_done = jnp.logical_or(contact_bool, done)
-        _, airtime = jax.lax.scan(_body, 0.0, contact_or_done)
+        _, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
         return airtime
 
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
+    def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         contact = traj.obs[self.feet_contact_obs_name]
         left_contact = jnp.any(contact[:, :2] > 0.5, axis=-1)
         right_contact = jnp.any(contact[:, 2:] > 0.5, axis=-1)
 
         # airtime counters
-        left_air = self._airtime_sequence(left_contact, traj.done)
-        right_air = self._airtime_sequence(right_contact, traj.done)
+        left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
+        right_air = self._airtime_sequence(reward_carry[1], right_contact, traj.done)
+
+        reward_carry = jnp.array([left_air[-1], right_air[-1]])
 
         # touchdown boolean (0→1 transition)
         def touchdown(c: Array) -> Array:
@@ -291,8 +297,9 @@ class FeetAirtimeReward(ksim.Reward):
         ) & (
             jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
         )
+        reward = jnp.where(is_zero_cmd, 0.0, swing_reward)
 
-        return jnp.where(is_zero_cmd, 0.0, swing_reward)
+        return reward, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1169,7 +1176,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
