@@ -4,11 +4,12 @@ import asyncio
 import functools
 import math
 from dataclasses import dataclass
-from typing import Collection, Self
+from typing import Collection, Self, Any
 
 import attrs
 import distrax
 import equinox as eqx
+import random
 import jax
 import jax.numpy as jnp
 import ksim
@@ -817,6 +818,111 @@ class XYOrientationCommand(ksim.Command):
         return jnp.where(switch_mask, new_command, prev_command)
 
 
+@attrs.define(frozen=True)
+class UnifiedCommand(ksim.Command):
+    """Unifiying all commands into one to allow for covariance control"""
+
+    vx_range: tuple[float, float] = attrs.field()
+    vy_range: tuple[float, float] = attrs.field()
+    wz_range: tuple[float, float] = attrs.field()
+    bh_range: tuple[float, float] = attrs.field()
+    bh_standing_range: tuple[float, float] = attrs.field()
+    rx_range: tuple[float, float] = attrs.field()
+    ry_range: tuple[float, float] = attrs.field()
+    ctrl_dt: float = attrs.field()
+    switch_prob: float = attrs.field()
+
+    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h = jax.random.split(rng, 8)
+        modes = ['forward', 'sideways', 'rotate', 'omni', 'stand']
+        mode = random.choice(rng_a, modes)
+        print(f"mode: {mode}")
+
+        # cmd  = [vx, vy, wz, bh, rx, ry]
+
+        vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
+        vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
+        wz = jax.random.uniform(rng_d, (1,), minval=self.wz_range[0], maxval=self.wz_range[1])
+        bh = jax.random.uniform(rng_e, (1,), minval=self.bh_range[0], maxval=self.bh_range[1])
+        bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
+        rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
+        ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
+
+        # don't like super small velocity commands
+        vx = jnp.where(jnp.abs(vx) < 0.09, 0.0, vx)
+        vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
+        wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
+
+        if mode == 'forward':
+            cmd = jnp.concatenate([vx, 0, 0, bh, 0, 0])
+        elif mode == 'sideways':
+            cmd = jnp.concatenate([0, vy, 0, bh, 0, 0])
+        elif mode == 'rotate':
+            cmd = jnp.concatenate([0, 0, wz, bh, 0, 0])
+        elif mode == 'omni':
+            cmd = jnp.concatenate([vx, vy, wz, bh, 0, 0])
+        elif mode == 'stand':
+            cmd = jnp.concatenate([0, 0, 0, bhs, rx, ry])
+        
+        print(f"cmd: {cmd}")
+
+        def get_heading_obs(wz_cmd, physics_data):
+            # init: read og base quat, get rz, that's init heading.
+            # then spin back base quat by euler [0 0 -init_rz], to get it to face 1 0 0 0.
+            # then every timestep, add rz_cmd*dt to heading, and spin back the base quat. 
+            # spun back base quat is obs. goal for model is to keep it at 1 0 0 0.
+
+            # get init heading rz
+            init_quat = physics_data.xquat[1]
+            init_euler = xax.quat_to_euler(init_quat)
+            init_rz = init_euler[2] + self.ctrl_dt * wz_cmd # add 1 step of yaw vel cmd to init rz.
+            init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
+
+            # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
+            # TODO temp heading obs, no noise for now. need solution.
+            heading_obs = physics_data.xquat[1]
+            
+            # Rotate heading_obs by inverse of init_rz_quat to spin it back
+            heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
+            
+            # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
+            # Combine into single vector [4], [1] -- > [5]
+            return jnp.concatenate([heading_obs, init_rz], axis=0)
+        
+        angvel_cmd = get_heading_obs(cmd[2], physics_data)
+        cmd = jnp.concatenate([cmd[:3], angvel_cmd, cmd[3:]])
+        print(f"final cmd: {cmd}")
+        assert cmd.shape == (11,)
+
+        return cmd
+
+    def __call__(
+        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
+    ) -> Array:
+        def update_heading_obs(prev_command, physics_data):
+            wz_cmd = prev_command[2]
+            yaw_cmd = prev_command[8]  # accumulated yaw, passed by carry for now
+            
+            # Update accumulated yaw by integrating angular velocity
+            yaw_cmd = yaw_cmd + wz_cmd * self.ctrl_dt
+            
+            # Get current heading observation and rotate it back by yaw_cmd
+            heading_obs = physics_data.xquat[1]  # Base quaternion
+            yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
+            heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
+
+            prev_command[3:7] = heading_obs
+            prev_command[8] = yaw_cmd
+            return prev_command
+        
+        prev_command = update_heading_obs(prev_command, physics_data)
+
+        rng_a, rng_b = jax.random.split(rng)
+        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
+        new_command = self.initial_command(physics_data, curriculum_level, rng_b)
+        return jnp.where(switch_mask, new_command, prev_command)
+
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -1123,46 +1229,42 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            LinearVelocityCommand(
-                x_range=(-0.5, 2.0), # m/s
-                y_range=(-0.5, 0.5), # m/s
-                x_zero_prob=0.5,
-                y_zero_prob=0.5,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-                min_magnitude=0.1,
-            ),
-            AngularVelocityCommand(
-                scale=0.5, # rad/s
-                zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-                min_magnitude=0.1,
-                ctrl_dt=self.config.ctrl_dt,
-            ),
             # LinearVelocityCommand(
-            #     x_range=(-0.3, 0.8),
-            #     y_range=(-0.3, 0.3),
-            #     x_zero_prob=1.0,
-            #     y_zero_prob=1.0,
+            #     x_range=(-0.5, 2.0), # m/s
+            #     y_range=(-0.5, 0.5), # m/s
+            #     x_zero_prob=0.5,
+            #     y_zero_prob=0.5,
             #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            #     min_magnitude=self.config.stand_still_threshold,
+            #     min_magnitude=0.1,
             # ),
             # AngularVelocityCommand(
-            #     scale=0.5,
-            #     zero_prob=1.0,
+            #     scale=0.5, # rad/s
+            #     zero_prob=0.9,
             #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            #     min_magnitude=self.config.stand_still_threshold,
+            #     min_magnitude=0.1,
             #     ctrl_dt=self.config.ctrl_dt,
             # ),
-            BaseHeightCommand(
-                lower_delta=-0.3, # m
-                higher_delta=0.1, # m
-                zero_prob=0.5,
-                switch_prob=self.config.ctrl_dt / 3, 
-            ),
-            XYOrientationCommand(
-                range=0.3, # +/- rad
-                zero_prob=0.85,
-                switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            # BaseHeightCommand(
+            #     lower_delta=-0.3, # m
+            #     higher_delta=0.1, # m
+            #     zero_prob=0.5,
+            #     switch_prob=self.config.ctrl_dt / 3, 
+            # ),
+            # XYOrientationCommand(
+            #     range=0.3, # +/- rad
+            #     zero_prob=0.85,
+            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
+            # ),
+            UnifiedCommand(
+                vx_range=(-0.5, 2.0), # m/s
+                vy_range=(-0.5, 0.5), # m/s
+                wz_range=(-0.5, 0.5), # rad/s
+                bh_range=(-0.1, 0.1), # m
+                bh_standing_range=(-0.5, 0.1), # m
+                rx_range=(-0.3, 0.3), # rad
+                ry_range=(-0.3, 0.3), # rad
+                ctrl_dt=self.config.ctrl_dt,
+                switch_prob=self.config.ctrl_dt / 3, # once per 3 seconds
             ),
         ]
 
@@ -1176,7 +1278,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.25), # seems to learn to not step
+            # FeetAirtimeReward(scale=0.3, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.2), # seems to learn to not step
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
@@ -1205,12 +1307,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.EpisodeLengthCurriculum(
-            num_levels=self.config.num_curriculum_levels,
-            increase_threshold=self.config.increase_threshold,
-            decrease_threshold=self.config.decrease_threshold,
-            min_level_steps=self.config.min_level_steps,
-            min_level=0.1,
+        return ksim.LinearCurriculum(
+            step_size=1.0, # binary curriculum
+            step_every_n_epochs=500,
+            min_level=0.0,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
