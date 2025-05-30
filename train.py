@@ -263,7 +263,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
             new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
-            return new_time[-1], new_time
+            return new_time, new_time
 
         # or with done to reset the airtime counter when the episode is done
         contact_or_done = jnp.logical_or(contact_bool, done)
@@ -1172,11 +1172,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.35),
+            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.25), # seems to learn to not step
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
