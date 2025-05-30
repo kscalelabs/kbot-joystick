@@ -9,7 +9,6 @@ from typing import Collection, Self, Any
 import attrs
 import distrax
 import equinox as eqx
-import random
 import jax
 import jax.numpy as jnp
 import ksim
@@ -835,8 +834,7 @@ class UnifiedCommand(ksim.Command):
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h = jax.random.split(rng, 8)
         modes = ['forward', 'sideways', 'rotate', 'omni', 'stand']
-        mode = random.choice(rng_a, modes)
-        print(f"mode: {mode}")
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=len(modes))
 
         # cmd  = [vx, vy, wz, bh, rx, ry]
 
@@ -853,30 +851,30 @@ class UnifiedCommand(ksim.Command):
         vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
         wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
 
+        mode = modes[mode]
+        _ = jnp.zeros_like(vx)
         if mode == 'forward':
-            cmd = jnp.concatenate([vx, 0, 0, bh, 0, 0])
+            cmd = jnp.concatenate([vx, _, _, bh, _, _])
         elif mode == 'sideways':
-            cmd = jnp.concatenate([0, vy, 0, bh, 0, 0])
+            cmd = jnp.concatenate([_, vy, _, bh, _, _])
         elif mode == 'rotate':
-            cmd = jnp.concatenate([0, 0, wz, bh, 0, 0])
+            cmd = jnp.concatenate([_, _, wz, bh, _, _])
         elif mode == 'omni':
-            cmd = jnp.concatenate([vx, vy, wz, bh, 0, 0])
+            cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
         elif mode == 'stand':
-            cmd = jnp.concatenate([0, 0, 0, bhs, rx, ry])
+            cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
         
-        print(f"cmd: {cmd}")
-
         def get_heading_obs(wz_cmd, physics_data):
             # init: read og base quat, get rz, that's init heading.
             # then spin back base quat by euler [0 0 -init_rz], to get it to face 1 0 0 0.
-            # then every timestep, add rz_cmd*dt to heading, and spin back the base quat. 
+            # then every timestep, add wz_cmd*dt to heading, and spin back the base quat. 
             # spun back base quat is obs. goal for model is to keep it at 1 0 0 0.
 
             # get init heading rz
             init_quat = physics_data.xquat[1]
             init_euler = xax.quat_to_euler(init_quat)
             init_rz = init_euler[2] + self.ctrl_dt * wz_cmd # add 1 step of yaw vel cmd to init rz.
-            init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
+            init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz]))
 
             # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
             # TODO temp heading obs, no noise for now. need solution.
@@ -887,11 +885,10 @@ class UnifiedCommand(ksim.Command):
             
             # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
             # Combine into single vector [4], [1] -- > [5]
-            return jnp.concatenate([heading_obs, init_rz], axis=0)
+            return jnp.concatenate([heading_obs, jnp.array([init_rz])], axis=0)
         
         angvel_cmd = get_heading_obs(cmd[2], physics_data)
         cmd = jnp.concatenate([cmd[:3], angvel_cmd, cmd[3:]])
-        print(f"final cmd: {cmd}")
         assert cmd.shape == (11,)
 
         return cmd
@@ -911,16 +908,16 @@ class UnifiedCommand(ksim.Command):
             yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
             heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
 
-            prev_command[3:7] = heading_obs
-            prev_command[8] = yaw_cmd
+            prev_command = prev_command.at[3:7].set(heading_obs)
+            prev_command = prev_command.at[8].set(yaw_cmd)
             return prev_command
         
-        prev_command = update_heading_obs(prev_command, physics_data)
+        continued_command = update_heading_obs(prev_command, physics_data)
 
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_command = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_command, prev_command)
+        return jnp.where(switch_mask, new_command, continued_command)
 
 
 class Actor(eqx.Module):
@@ -1374,24 +1371,29 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
-        base_height_cmd = commands["base_height_command"]
-        base_xy_orient_cmd = commands["xyorientation_command"]
+        # lin_vel_cmd_2 = commands["linear_velocity_command"]
+        # ang_vel_cmd = commands["angular_velocity_command"]
+        # base_height_cmd = commands["base_height_command"]
+        # base_xy_orient_cmd = commands["xyorientation_command"]
+        cmd = commands["unified_command"]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
-            lin_vel_cmd_2,  # 2
-            # ang_vel_cmd,  # 6
+            # lin_vel_cmd_2,  # 2
+            # # ang_vel_cmd,  # 6
 
-            # TODO HACK heading
-            ang_vel_cmd[..., :-1],
-            jnp.zeros_like(ang_vel_cmd[..., -1:]),
+            # # TODO HACK heading
+            # ang_vel_cmd[..., :-1],
+            # jnp.zeros_like(ang_vel_cmd[..., -1:]),
 
-            base_height_cmd,  # 1
-            base_xy_orient_cmd,  # 2
+            # base_height_cmd,  # 1
+            # base_xy_orient_cmd,  # 2
+
+            cmd[..., :3],
+            jnp.zeros_like(cmd[..., 3:4]),
+            cmd[..., 4:]
         ]
         if self.config.use_acc_gyro:
             obs += [
@@ -1416,10 +1418,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        lin_vel_cmd_2 = commands["linear_velocity_command"]
-        ang_vel_cmd = commands["angular_velocity_command"]
-        base_height_cmd = commands["base_height_command"]
-        base_xy_orient_cmd = commands["xyorientation_command"]
+        # lin_vel_cmd_2 = commands["linear_velocity_command"]
+        # ang_vel_cmd = commands["angular_velocity_command"]
+        # base_height_cmd = commands["base_height_command"]
+        # base_xy_orient_cmd = commands["xyorientation_command"]
+        cmd = commands["unified_command"]
 
         # privileged obs
         feet_contact_4 = observations["feet_contact_observation"]
@@ -1439,15 +1442,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_pos_n,
                 joint_vel_n / 10.0, # TODO fix this
                 proj_grav_3,
-                lin_vel_cmd_2,
-                # ang_vel_cmd,
+                # lin_vel_cmd_2,
+                # # ang_vel_cmd,
 
-                # TODO HACK heading
-                ang_vel_cmd[..., :-1],
-                jnp.zeros_like(ang_vel_cmd[..., -1:]),
+                # # TODO HACK heading
+                # ang_vel_cmd[..., :-1],
+                # jnp.zeros_like(ang_vel_cmd[..., -1:]),
 
-                base_height_cmd,
-                base_xy_orient_cmd,
+                # base_height_cmd,
+                # base_xy_orient_cmd,
+
+                cmd[..., :3],
+                jnp.zeros_like(cmd[..., 3:4]),
+                cmd[..., 4:],
+
                 imu_acc_3, # m/s^2
                 imu_gyro_3, # rad/s
                 # privileged obs:
