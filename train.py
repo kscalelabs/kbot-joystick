@@ -943,6 +943,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            action_noise=math.radians(5),
+            action_noise_type="uniform",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -1037,14 +1039,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             LinearVelocityCommand(
-                x_range=(-0.5, 1.0),
+                x_range=(-1.0, 1.0),
                 y_range=(-0.5, 0.5),
                 x_zero_prob=0.3,
                 y_zero_prob=0.5,
                 switch_prob=self.config.ctrl_dt / 10,  # once per 10 seconds
             ),
             AngularVelocityCommand(
-                scale=0.5,
+                scale=1.0,
                 zero_prob=0.9,
                 switch_prob=self.config.ctrl_dt / 10,  # once per 10 seconds
             ),
@@ -1105,7 +1107,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
-            min_level=0.1,
+            min_level=0.5,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
