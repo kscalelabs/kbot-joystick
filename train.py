@@ -964,9 +964,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 y_linvel=1.0,
                 z_linvel=0.3,
                 vel_range=(0.3, 1.5),
-                x_angvel=1.5,
-                y_angvel=1.5,
-                z_angvel=1.5,
+                x_angvel=4.0,
+                y_angvel=4.0,
+                z_angvel=4.0,
                 interval_range=(3.0, 8.0),
             ),
         ]
@@ -1037,16 +1037,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             LinearVelocityCommand(
-                x_range=(-0.3, 0.7),
-                y_range=(-0.2, 0.2),
-                x_zero_prob=0.5,
-                y_zero_prob=0.6,
-                switch_prob=self.config.ctrl_dt / 30,  # once per 30 seconds
+                x_range=(-0.5, 1.0),
+                y_range=(-0.5, 0.5),
+                x_zero_prob=0.3,
+                y_zero_prob=0.5,
+                switch_prob=self.config.ctrl_dt / 10,  # once per 10 seconds
             ),
             AngularVelocityCommand(
-                scale=0.1,
+                scale=0.5,
                 zero_prob=0.9,
-                switch_prob=self.config.ctrl_dt / 30,  # once per 30 seconds
+                switch_prob=self.config.ctrl_dt / 10,  # once per 10 seconds
             ),
             GaitFrequencyCommand(
                 gait_freq_lower=self.config.gait_freq_range[0],
@@ -1059,7 +1059,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=0.5),
             LinearVelocityTrackingReward(
-                scale=1.5,
+                scale=2.0,
                 stand_still_threshold=self.config.stand_still_threshold,
                 in_robot_frame=True,
             ),
@@ -1081,7 +1081,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
-            # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
+            FeetPhaseReward(scale=2.1, max_foot_height=0.15, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.25),
             ContactForcePenalty(
                 scale=-0.03,
@@ -1341,7 +1341,7 @@ if __name__ == "__main__":
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.001, 0.005),  # Simulate 1-5ms of latency.
+            action_latency_range=(0.001, 0.01),  # Simulate 1-5ms of latency.
             actuator_update_dt=0.01,
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
