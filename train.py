@@ -178,11 +178,7 @@ class SimpleSingleFootContactReward(ksim.Reward):
         right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
         single = jnp.logical_xor(left, right)
 
-        is_zero_cmd = (
-            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
-        ) & (
-            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
-        )
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, single)
         return reward
 
@@ -234,11 +230,7 @@ class SingleFootContactReward(ksim.Reward):
         )
         reward = window_any.astype(jnp.float32)
 
-        is_zero_cmd = (
-            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
-        ) & (
-            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
-        )
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, reward)
         return reward
 
@@ -292,11 +284,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
         swing_reward = (left_air - self.touchdown_penalty) * td_l.astype(jnp.float32) + (right_air - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
         # standing mask
-        is_zero_cmd = (
-            jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3
-        ) & (
-            jnp.abs(traj.command["angular_velocity_command"][:, 0]) < 1e-3
-        )
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, swing_reward)
 
         return reward, reward_carry
@@ -383,7 +371,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.25)
     linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
-    command_name: str = attrs.field(default="linear_velocity_command")
+    command_name: str = attrs.field(default="unified_command")
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
@@ -401,7 +389,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         base_z_quat = xax.euler_to_quat(base_euler)
 
         # rotate local frame commands to global frame
-        robot_vel_cmd = jnp.zeros_like(global_vel).at[:, :2].set(trajectory.command[self.command_name])
+        robot_vel_cmd = jnp.zeros_like(global_vel).at[:, :2].set(trajectory.command[self.command_name][:, :2])
         global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
 
         # drop vz. vz conflicts with base height reward.
@@ -409,11 +397,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         global_vel_xy = global_vel[:, :2]
 
         # now compute error. special trick: different kernels for standing and walking.
-        zero_cmd_mask = (
-            jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
-        ) & (
-            jnp.abs(trajectory.command["angular_velocity_command"][:, 0]) < 1e-3
-        )
+        zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, 2*jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
@@ -424,11 +408,11 @@ class AngularVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the heading using quaternion-based error computation."""
 
     error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="angular_velocity_command")
+    command_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        base_yaw_cmd = trajectory.command[self.command_name][:, -1]
+        base_yaw_cmd = trajectory.command[self.command_name][:, 7]
 
         base_yaw_quat = xax.euler_to_quat(jnp.stack([
             jnp.zeros_like(base_yaw_cmd),
@@ -451,7 +435,7 @@ class XYOrientationReward(ksim.Reward):
     """Reward for tracking the xy base orientation using quaternion-based error computation."""
 
     error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="xyorientation_command")
+    command_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         euler_orientation = xax.quat_to_euler(trajectory.xquat[:, 1, :])
@@ -459,9 +443,9 @@ class XYOrientationReward(ksim.Reward):
         base_xy_quat = xax.euler_to_quat(euler_orientation)
 
         commanded_euler = jnp.stack([
-            trajectory.command[self.command_name][:, 0],
-            trajectory.command[self.command_name][:, 1],
-            jnp.zeros_like(trajectory.command[self.command_name][:, 0])
+            trajectory.command[self.command_name][:, 9],
+            trajectory.command[self.command_name][:, 10],
+            jnp.zeros_like(trajectory.command[self.command_name][:, 10])
         ], axis=-1)
         base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
 
@@ -478,7 +462,7 @@ class BaseHeightReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_height = trajectory.xpos[:, 1, 2] # 1st body, because world is 0. 2nd element is z.
-        commanded_height = trajectory.command["base_height_command"][:, 0] + self.standard_height
+        commanded_height = trajectory.command["unified_command"][:, 8] + self.standard_height
         
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
@@ -502,11 +486,7 @@ class FeetPositionReward(ksim.Reward):
         reward = jnp.exp(-stance_error / self.error_scale)
 
         # standing?
-        zero_cmd_mask = (
-            jnp.linalg.norm(trajectory.command["linear_velocity_command"], axis=-1) < 1e-3
-        ) & (
-            jnp.abs(trajectory.command["angular_velocity_command"][:, 0]) < 1e-3
-        )
+        zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
 
@@ -833,11 +813,8 @@ class UnifiedCommand(ksim.Command):
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h = jax.random.split(rng, 8)
-        modes = ['forward', 'sideways', 'rotate', 'omni', 'stand']
-        mode = jax.random.randint(rng_a, (), minval=0, maxval=len(modes))
 
         # cmd  = [vx, vy, wz, bh, rx, ry]
-
         vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
         vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
         wz = jax.random.uniform(rng_d, (1,), minval=self.wz_range[0], maxval=self.wz_range[1])
@@ -851,18 +828,22 @@ class UnifiedCommand(ksim.Command):
         vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
         wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
 
-        mode = modes[mode]
         _ = jnp.zeros_like(vx)
-        if mode == 'forward':
-            cmd = jnp.concatenate([vx, _, _, bh, _, _])
-        elif mode == 'sideways':
-            cmd = jnp.concatenate([_, vy, _, bh, _, _])
-        elif mode == 'rotate':
-            cmd = jnp.concatenate([_, _, wz, bh, _, _])
-        elif mode == 'omni':
-            cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
-        elif mode == 'stand':
-            cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        
+        # Create each mode's command vector
+        forward_cmd = jnp.concatenate([vx, _, _, bh, _, _])
+        sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _])
+        rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
+        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
+        stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=5)
+        # Use JAX's where to select the appropriate command
+        cmd = jnp.where(mode == 0, forward_cmd,
+              jnp.where(mode == 1, sideways_cmd,
+              jnp.where(mode == 2, rotate_cmd,
+              jnp.where(mode == 3, omni_cmd,
+              stand_cmd))))
         
         def get_heading_obs(wz_cmd, physics_data):
             # init: read og base quat, get rz, that's init heading.
