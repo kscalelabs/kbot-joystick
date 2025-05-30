@@ -1041,8 +1041,8 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
-            actuator_update_dt=0.005,
-            drop_action_prob=0.01,  # Drop 1% of commands.
+            actuator_update_dt=0.003,
+            drop_action_prob=0.05,  # Drop 1% of commands.
             # Visualization parameters.
             render_track_body_id=0,
             render_markers=True,
@@ -1050,3 +1050,4 @@ if __name__ == "__main__":
             save_every_n_seconds=60,
         ),
     )
+
