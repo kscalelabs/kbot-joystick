@@ -774,7 +774,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-0.03, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.5, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
@@ -1041,7 +1041,6 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             action_latency_range=(0.001, 0.01),  # Simulate 1-10ms of latency.
-            actuator_update_dt=0.003,
             drop_action_prob=0.05,  # Drop 1% of commands.
             # Visualization parameters.
             render_track_body_id=0,
