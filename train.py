@@ -245,6 +245,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
     feet_contact_obs_name: str = "feet_contact_observation"
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
+    scale_by_curriculum: bool = False
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         # initial left and right airtime
@@ -879,7 +880,7 @@ class UnifiedCommand(ksim.Command):
     ) -> Array:
         def update_heading_obs(prev_command, physics_data):
             wz_cmd = prev_command[2]
-            yaw_cmd = prev_command[8]  # accumulated yaw, passed by carry for now
+            yaw_cmd = prev_command[7]  # accumulated yaw, passed by carry for now
             
             # Update accumulated yaw by integrating angular velocity
             yaw_cmd = yaw_cmd + wz_cmd * self.ctrl_dt
@@ -890,7 +891,7 @@ class UnifiedCommand(ksim.Command):
             heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
 
             prev_command = prev_command.at[3:7].set(heading_obs)
-            prev_command = prev_command.at[8].set(yaw_cmd)
+            prev_command = prev_command.at[7].set(yaw_cmd)
             return prev_command
         
         continued_command = update_heading_obs(prev_command, physics_data)
@@ -1256,7 +1257,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            # FeetAirtimeReward(scale=0.3, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.2), # seems to learn to not step
+            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True), # seems to learn to not step
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
@@ -1286,8 +1287,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.LinearCurriculum(
-            step_size=1.0, # binary curriculum
-            step_every_n_epochs=500,
+            step_size=0.05, # 200 / 0.05 = 4000 iters
+            step_every_n_epochs=200,
             min_level=0.0,
         )
 
