@@ -951,8 +951,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.05),
             ksim.JointDampingRandomizer(),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.05),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.3, scale_upper=1.5
@@ -1059,7 +1059,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            ksim.StayAliveReward(scale=0.5),
+            ksim.StayAliveReward(scale=1.5),
             LinearVelocityTrackingReward(
                 scale=2.0,
                 stand_still_threshold=self.config.stand_still_threshold,
