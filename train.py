@@ -153,16 +153,16 @@ class ContactForcePenalty(ksim.Reward):
         return jnp.sum(cost, axis=-1)
 
 
-@attrs.define(frozen=True, kw_only=True)
-class FeetSlipPenalty(ksim.Reward):
-    """Penalises COM motion while feet are in contact."""
+# @attrs.define(frozen=True, kw_only=True)
+# class FeetSlipPenalty(ksim.Reward):
+#     """Penalises COM motion while feet are in contact."""
 
-    scale: float = -1.0
+#     scale: float = -1.0
 
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
-        vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][:, :2], axis=-1, keepdims=True)
-        contact = traj.obs["feet_contact_observation"]
-        return jnp.sum(vel * contact, axis=-1)
+#     def get_reward(self, traj: ksim.Trajectory) -> Array:
+#         vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][:, :2], axis=-1, keepdims=True)
+#         contact = traj.obs["feet_contact_observation"]
+#         return jnp.sum(vel * contact, axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -174,9 +174,10 @@ class SimpleSingleFootContactReward(ksim.Reward):
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
-        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
-        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
+        left = contact[:, 0]
+        right = contact[:, 1]
         single = jnp.logical_xor(left, right)
+        print(f"left: {left} right: {right} single: {single}", sep="\n")
 
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, single)
@@ -210,9 +211,9 @@ class SingleFootContactReward(ksim.Reward):
         magnitude is nonzero
         • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
         """
-        contact = traj.obs["feet_contact_observation"]
-        left = jnp.any(contact[:, :2] > 0.5, axis=-1)
-        right = jnp.any(contact[:, 2:] > 0.5, axis=-1)
+        contact = traj.obs[self.feet_contact_obs_name]
+        left = contact[:, 0]
+        right = contact[:, 1]
         single = jnp.logical_xor(left, right)
 
         k = int(self.window_size / self.ctrl_dt)
@@ -265,8 +266,8 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         contact = traj.obs[self.feet_contact_obs_name]
-        left_contact = jnp.any(contact[:, :2] > 0.5, axis=-1)
-        right_contact = jnp.any(contact[:, 2:] > 0.5, axis=-1)
+        left_contact = contact[:, 0]
+        right_contact = contact[:, 1]
 
         # airtime counters
         left_carry, left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
@@ -492,12 +493,14 @@ class FeetPositionReward(ksim.Reward):
         return reward
 
 @attrs.define(frozen=True, kw_only=True)
-class FeetContactObservation(ksim.FeetContactObservation):
-    """Flattened (4,) contact flags of both feet."""
+class FeetContactObservation(ksim.FloorContactForceObservation):
+    """(2,) array of contact flags for left and right feet, calculated from floor contact forces."""
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return super().observe(state, curriculum_level, rng).flatten()
-
+        contact_forces = super().observe(state, curriculum_level, rng)
+        left_contact = jnp.linalg.norm(contact_forces[:3]) > 0.1
+        right_contact = jnp.linalg.norm(contact_forces[3:]) > 0.1
+        return jnp.array([left_contact, right_contact])
 
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
@@ -1133,13 +1136,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_force=0.5,
-                y_force=0.5,
-                z_force=0.3,
-                force_range=(0.2, 0.8),
-                x_angular_force=0.0, # 0.4
-                y_angular_force=0.0,
-                z_angular_force=0.0,
+                x_linvel=0.5,
+                y_linvel=0.5,
+                z_linvel=0.3,
+                vel_range=(0.2, 0.8),
+                x_angvel=0.0, # 0.4
+                y_angvel=0.0,
+                z_angvel=0.0,
                 interval_range=(4.0, 6.0),
             ),
         ]
@@ -1185,6 +1188,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_linvel", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_angvel", noise=0.0),
             FeetContactObservation.create(
+                physics_model=physics_model,
+                foot_left_geom_names=(
+                    "KB_D_501L_L_LEG_FOOT_collision_capsule_0",
+                    "KB_D_501L_L_LEG_FOOT_collision_capsule_1",
+                ),
+                foot_right_geom_names=(
+                    "KB_D_501R_R_LEG_FOOT_collision_capsule_0",
+                    "KB_D_501R_R_LEG_FOOT_collision_capsule_1",
+                ),
+                floor_geom_names="floor",
+            ),
+            ksim.FloorContactForceObservation.create(
                 physics_model=physics_model,
                 foot_left_geom_names=(
                     "KB_D_501L_L_LEG_FOOT_collision_capsule_0",
@@ -1281,7 +1296,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
-            ksim.EpisodeLengthTermination(max_length=24),
+            ksim.EpisodeLengthTermination(max_length_sec=24),
             # ksim.FarFromOriginTermination(max_dist15.0),
         ]
 
@@ -1311,7 +1326,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_critic_inputs = (
             num_actor_inputs
-            + 4  # feet contact
+            + 2  # feet contact
+            + 6  # feet floor contact force
             + 6  # feet position
             + 3
             + 4  # base pos / quat
@@ -1407,7 +1423,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         cmd = commands["unified_command"]
 
         # privileged obs
-        feet_contact_4 = observations["feet_contact_observation"]
+        feet_contact_2 = observations["feet_contact_observation"]
+        feet_floor_contact_force_6 = observations["feet_floor_contact_force_observation"]
         feet_position_6 = observations["feet_position_observation"]
         base_position_3 = observations["base_position_observation"]
         base_orientation_4 = observations["base_orientation_observation"]
@@ -1448,7 +1465,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_orientation_4,
                 base_lin_vel_3,
                 base_ang_vel_3,
-                feet_contact_4,
+                feet_contact_2,
+                feet_floor_contact_force_6,
                 feet_position_6,
                 base_height,
             ],
