@@ -172,8 +172,8 @@ class SimpleSingleFootContactReward(ksim.Reward):
     scale: float = 1.0
     
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = traj.obs["sensor_observation_left_foot_touch"] > 0.1 # Newton
-        right_contact = traj.obs["sensor_observation_right_foot_touch"] > 0.1
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
         single = jnp.logical_xor(left_contact, right_contact).squeeze()
 
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
@@ -207,8 +207,8 @@ class SingleFootContactReward(ksim.Reward):
         magnitude is nonzero
         • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
         """
-        left_contact = traj.obs["sensor_observation_left_foot_touch"] > 0.1
-        right_contact = traj.obs["sensor_observation_right_foot_touch"] > 0.1
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
         single = jnp.logical_xor(left_contact, right_contact)
 
         k = int(self.window_size / self.ctrl_dt)
@@ -259,8 +259,8 @@ class FeetAirtimeReward(ksim.StatefulReward):
         return carry, airtime
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
-        left_contact = traj.obs["sensor_observation_left_foot_touch"] > 0.1
-        right_contact = traj.obs["sensor_observation_right_foot_touch"] > 0.1
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
 
         # airtime counters
         left_carry, left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
