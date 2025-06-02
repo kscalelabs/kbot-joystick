@@ -511,7 +511,7 @@ class FeetOrientationReward(ksim.Reward):
         right_error = jnp.abs(right_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
 
         total_error = left_error + right_error
-        return self.scale * jnp.exp(-total_error / self.error_scale)
+        return jnp.exp(-total_error / self.error_scale)
 
 
 @attrs.define(frozen=True)
@@ -1261,7 +1261,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
             FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True), # seems to learn to not step
-            FeetOrientationReward(scale=0.05, error_scale=0.5),
+            FeetOrientationReward(scale=0.05, error_scale=0.25),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
