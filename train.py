@@ -70,24 +70,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
-    # Curriculum parameters.
-    num_curriculum_levels: int = xax.field(
-        value=100,
-        help="The number of curriculum levels to use.",
-    )
-    increase_threshold: float = xax.field(
-        value=5.0,
-        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
-    )
-    decrease_threshold: float = xax.field(
-        value=1.0,
-        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
-    )
-    min_level_steps: int = xax.field(
-        value=1,
-        help="The minimum number of steps to wait before changing the curriculum level.",
-    )
-
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=3e-4,
@@ -184,29 +166,14 @@ class SimpleSingleFootContactReward(ksim.Reward):
 @attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.Reward):
     # TODO stateful and dones
-    """Reward that encourages a single-foot contact pattern during locomotion.
-
-    The reward returns ``1`` whenever exactly one foot is in contact with the
-    ground and the robot is commanded to move (i.e. *not* stand-still).  When
-    both feet are in contact or both are in the air the reward is ``0``.
-
-    For stand-still commands 
-    the reward is always ``1`` so as not to penalise recovery steps that may be
-    required in order to keep balance while standing.
-    """
+    """Reward having one and only one foot in contact with the ground, while walking.
+    Allows for 0.2s grace period when both feet are in contact."""
 
     scale: float = 1.0
     ctrl_dt: float = 0.02
     window_size: float = 0.2  # seconds
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        """Implements Eq. (14) – single-foot contact with 0.2 s window.
-
-        • reward = 1 if, within the past 0.2 s, there was at least one frame
-        where *exactly one* foot touched the ground **and** the command
-        magnitude is nonzero
-        • While standing (|cmd| ≤ threshold) the reward is fixed to 1.
-        """
         left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
         right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
         single = jnp.logical_xor(left_contact, right_contact)
@@ -345,28 +312,6 @@ class BentArmPenalty(JointPositionPenalty):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class StraightLegPenalty(JointPositionPenalty):
-    @classmethod
-    def create_penalty(
-        cls,
-        physics_model: ksim.PhysicsModel,
-        scale: float = -1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        return cls.create_from_names(
-            names=[
-                "dof_left_hip_roll_03",
-                "dof_left_hip_yaw_03",
-                "dof_right_hip_roll_03",
-                "dof_right_hip_yaw_03",
-            ],
-            physics_model=physics_model,
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
-
-
-@attrs.define(frozen=True, kw_only=True)
 class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
@@ -468,6 +413,7 @@ class BaseHeightReward(ksim.Reward):
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
 
+
 @attrs.define(frozen=True)
 class FeetPositionReward(ksim.Reward):
     """ Reward for keeping the feet next to each other when standing still."""
@@ -558,259 +504,6 @@ class BaseHeightObservation(ksim.Observation):
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.data.xpos[1, 2:]
-
-
-@attrs.define(kw_only=True)
-class AngularVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the 1-D yaw-rate command."""
-
-    command_name: str = attrs.field()
-    radius: float = attrs.field(default=0.05)
-    size: float = attrs.field(default=0.03)
-    arrow_len: float = attrs.field(default=0.25)
-    height: float = attrs.field(default=0.75)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        w = float(trajectory.command[self.command_name][0])
-        self.pos = (0.0, 0.0, self.height)
-
-        if abs(w) < 1e-4:  # zero → grey sphere
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-            self.scale = (self.radius, self.radius, self.radius)
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-            return
-
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        self.scale = (self.size, self.size, self.arrow_len)
-        direction = (0.0, 0.0, 1.0 if w > 0 else -1.0)
-        self.orientation = self.quat_from_direction(direction)
-        self.rgba = (0.2, 0.2, 1.0, 0.8) if w > 0 else (1.0, 0.5, 0.0, 0.8)
-
-    @classmethod
-    def get(cls, command_name: str, *, height: float = 0.75) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
-            scale=(0.0, 0.0, 0.0),
-            height=height,
-        )
-
-
-@attrs.define(kw_only=True)
-class LinearVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the planar (x,y) velocity command."""
-
-    command_name: str = attrs.field()
-    size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=1.0)
-    height: float = attrs.field(default=0.5)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        vx, vy = map(float, trajectory.command[self.command_name])
-        speed = (vx * vx + vy * vy) ** 0.5
-        self.pos = (0.0, 0.0, self.height)
-
-        if speed < 1e-4:  # zero → grey sphere
-            self.geom = mujoco.mjtGeom.mjGEOM_SPHERE
-            self.scale = (self.size, self.size, self.size)
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-            return
-
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        self.scale = (self.size, self.size, self.arrow_scale * speed)
-        self.orientation = self.quat_from_direction((vx, vy, 0.0))
-        self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        *,
-        arrow_scale: float = 0.25,
-        height: float = 0.5,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_SPHERE,
-            scale=(0.0, 0.0, 0.0),
-            arrow_scale=arrow_scale,
-            height=height,
-        )
-
-
-@attrs.define(frozen=True)
-class AngularVelocityCommand(ksim.Command):
-    """Command to turn the robot."""
-
-    scale: float = attrs.field()
-    ctrl_dt: float = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-    min_magnitude: float = attrs.field(default=0.01)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        # sample ang vel cmd
-        rng_a, rng_b = jax.random.split(rng)
-        yaw_vel_cmd = jax.random.uniform(rng_b, (1,), minval=-self.scale, maxval=self.scale)
-        zero_mask = jnp.logical_or(jax.random.bernoulli(rng_a, self.zero_prob), jnp.abs(yaw_vel_cmd) < self.min_magnitude)
-        yaw_vel_cmd = jnp.where(zero_mask, jnp.zeros_like(yaw_vel_cmd), yaw_vel_cmd)
-
-        # init: read og base quat, get rz, thats init heading.
-        # then spin back base quat by euler [0 0 -init_rz], to get it to face 1 0 0 0.
-        # then every timestep, add rz_cmd*dt to heading, and spin back the base quat. 
-        # spun back base quat is obs. goal for model is to keep it at 1 0 0 0.
-        # can also use this method for roll and pitch cmd.
-
-        # get init heading rz
-        init_quat = physics_data.xquat[1]
-        init_euler = xax.quat_to_euler(init_quat)
-        init_rz = init_euler[2] + self.ctrl_dt * yaw_vel_cmd # add 1 step of yaw vel cmd to init rz.
-        init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz[0]]))
-
-        # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
-        # TODO temp heading obs, no noise for now. need solution.
-        heading_obs = physics_data.xquat[1]
-        
-        # Rotate heading_obs by inverse of init_rz_quat to spin it back
-        heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
-        
-        # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
-        # Combine into single vector [1], [4], [1] -- > [6]
-        return jnp.concatenate([yaw_vel_cmd, heading_obs, init_rz], axis=0)
-
-
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:       
-        # Extract previous values
-        prev_yaw_vel = prev_command[0]
-        yaw_cmd = prev_command[5]  # accumulated yaw, passed by carry for now
-        
-        # Update accumulated yaw by integrating angular velocity
-        yaw_cmd = yaw_cmd + prev_yaw_vel * self.ctrl_dt
-        
-        # Get current heading observation and rotate it back by yaw_cmd
-        heading_obs = physics_data.xquat[1]  # Base quaternion
-        yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
-        heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
-
-        updated_command = jnp.concatenate([jnp.array([prev_yaw_vel]), heading_obs, jnp.array([yaw_cmd])], axis=0)
-        
-        # sample new commands
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        cmd = jnp.where(switch_mask, new_commands, updated_command)
-        return cmd
-
-    def get_markers(self) -> Collection[ksim.vis.Marker]:
-        return [AngularVelocityCommandMarker.get(self.command_name)]
-
-
-@attrs.define(frozen=True)
-class LinearVelocityCommand(ksim.Command):
-    """Command to move the robot in a straight line.
-
-    By convention, X is forward and Y is left. The switching probability is the
-    probability of resampling the command at each step. The zero probability is
-    the probability of the command being zero - this can be used to turn off
-    any command.
-    """
-
-    x_range: tuple[float, float] = attrs.field()
-    y_range: tuple[float, float] = attrs.field()
-    x_zero_prob: float = attrs.field(default=0.0)
-    y_zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-    vis_height: float = attrs.field(default=1.0)
-    vis_scale: float = attrs.field(default=0.05)
-    min_magnitude: float = attrs.field(default=0.01)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_x, rng_y, rng_zero_x, rng_zero_y = jax.random.split(rng, 4)
-        (xmin, xmax), (ymin, ymax) = self.x_range, self.y_range
-        x = jax.random.uniform(rng_x, (1,), minval=xmin, maxval=xmax)
-        y = jax.random.uniform(rng_y, (1,), minval=ymin, maxval=ymax)
-        x_zero_mask = jnp.logical_or(jax.random.bernoulli(rng_zero_x, self.x_zero_prob), jnp.abs(x) < self.min_magnitude)  # don't like small commands
-        y_zero_mask = jnp.logical_or(jax.random.bernoulli(rng_zero_y, self.y_zero_prob), jnp.abs(y) < self.min_magnitude)
-        return jnp.concatenate(
-            [
-                jnp.where(x_zero_mask, 0.0, x),
-                jnp.where(y_zero_mask, 0.0, y),
-            ]
-        )
-
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_commands = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_commands, prev_command)
-
-    def get_markers(self) -> Collection[ksim.vis.Marker]:
-        return [LinearVelocityCommandMarker.get(self.command_name)]
-
-
-@attrs.define(frozen=True)
-class BaseHeightCommand(ksim.Command):
-    """Command to set the base height.
-    
-    Samples height offset uniformly between lower_delta and higher_delta with a configurable
-    switch probability. When zero probability is triggered, uses standard_height.
-    """
-
-    lower_delta: float = attrs.field()
-    higher_delta: float = attrs.field()
-    zero_prob: float = attrs.field(default=0.0)
-    switch_prob: float = attrs.field(default=0.0)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        zero_mask = jax.random.bernoulli(rng_a, self.zero_prob)
-        delta = jax.random.uniform(rng_b, (1,), minval=self.lower_delta, maxval=self.higher_delta)
-        return jnp.where(zero_mask, jnp.zeros_like(delta), delta)
-
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_delta = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_delta, prev_command)
-
-
-@attrs.define(frozen=True)
-class XYOrientationCommand(ksim.Command):
-    """Command to set base xy orientation. """
-
-    range: float = attrs.field()
-    zero_prob: float = attrs.field(default=0.85)
-    switch_prob: float = attrs.field(default=0.0)
-
-    def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_rx, rng_ry, rng_zero = jax.random.split(rng, 3)
-        rx = jax.random.uniform(rng_rx, (1,), minval=-self.range, maxval=self.range)
-        ry = jax.random.uniform(rng_ry, (1,), minval=-self.range, maxval=self.range)
-
-        # Apply zero probability to rx and ry independently
-        rng_zero_rx, rng_zero_ry = jax.random.split(rng_zero)
-        zero_rx = jax.random.bernoulli(rng_zero_rx, self.zero_prob)
-        zero_ry = jax.random.bernoulli(rng_zero_ry, self.zero_prob)
-        rx = jnp.where(zero_rx, 0.0, rx)
-        ry = jnp.where(zero_ry, 0.0, ry)
-
-        return jnp.concatenate([rx, ry])
-    
-    def __call__(
-        self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
-    ) -> Array:
-        rng_a, rng_b = jax.random.split(rng)
-        switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
-        new_command = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_command, prev_command)
 
 
 @attrs.define(frozen=True)
@@ -1211,32 +904,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
-            # LinearVelocityCommand(
-            #     x_range=(-0.5, 2.0), # m/s
-            #     y_range=(-0.5, 0.5), # m/s
-            #     x_zero_prob=0.5,
-            #     y_zero_prob=0.5,
-            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            #     min_magnitude=0.1,
-            # ),
-            # AngularVelocityCommand(
-            #     scale=0.5, # rad/s
-            #     zero_prob=0.9,
-            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            #     min_magnitude=0.1,
-            #     ctrl_dt=self.config.ctrl_dt,
-            # ),
-            # BaseHeightCommand(
-            #     lower_delta=-0.3, # m
-            #     higher_delta=0.1, # m
-            #     zero_prob=0.5,
-            #     switch_prob=self.config.ctrl_dt / 3, 
-            # ),
-            # XYOrientationCommand(
-            #     range=0.3, # +/- rad
-            #     zero_prob=0.85,
-            #     switch_prob=self.config.ctrl_dt / 3,  # once per 3 seconds
-            # ),
             UnifiedCommand(
                 vx_range=(-0.5, 2.0), # m/s
                 vy_range=(-0.5, 0.5), # m/s
@@ -1266,18 +933,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
             # BentArmPenalty.create_penalty(physics_model, scale=-0.02),
-
-        
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            # StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
             # FeetSlipPenalty(scale=-0.25),
             # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
             #     scale=-0.03,
-            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"), # BUG wrong sensors
             # ),
         ]
 
@@ -1286,7 +950,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
             ksim.EpisodeLengthTermination(max_length_sec=24),
-            # ksim.FarFromOriginTermination(max_dist15.0),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
@@ -1357,25 +1020,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        # lin_vel_cmd_2 = commands["linear_velocity_command"]
-        # ang_vel_cmd = commands["angular_velocity_command"]
-        # base_height_cmd = commands["base_height_command"]
-        # base_xy_orient_cmd = commands["xyorientation_command"]
         cmd = commands["unified_command"]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
-            # lin_vel_cmd_2,  # 2
-            # # ang_vel_cmd,  # 6
-
-            # # TODO HACK heading
-            # ang_vel_cmd[..., :-1],
-            # jnp.zeros_like(ang_vel_cmd[..., -1:]),
-
-            # base_height_cmd,  # 1
-            # base_xy_orient_cmd,  # 2
 
             cmd[..., :3],
             jnp.zeros_like(cmd[..., 3:4]),
@@ -1404,10 +1054,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        # lin_vel_cmd_2 = commands["linear_velocity_command"]
-        # ang_vel_cmd = commands["angular_velocity_command"]
-        # base_height_cmd = commands["base_height_command"]
-        # base_xy_orient_cmd = commands["xyorientation_command"]
         cmd = commands["unified_command"]
 
         # privileged obs
@@ -1429,15 +1075,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_pos_n,
                 joint_vel_n / 10.0, # TODO fix this
                 proj_grav_3,
-                # lin_vel_cmd_2,
-                # # ang_vel_cmd,
-
-                # # TODO HACK heading
-                # ang_vel_cmd[..., :-1],
-                # jnp.zeros_like(ang_vel_cmd[..., -1:]),
-
-                # base_height_cmd,
-                # base_xy_orient_cmd,
 
                 cmd[..., :3],
                 jnp.zeros_like(cmd[..., 3:4]),
@@ -1567,7 +1204,7 @@ if __name__ == "__main__":
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
-            render_markers=True,
+            render_markers=False,
             render_full_every_n_seconds=0,
             render_length_seconds=10,
             max_values_per_plot=50,
