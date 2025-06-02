@@ -164,38 +164,29 @@ class SimpleSingleFootContactReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SingleFootContactReward(ksim.Reward):
-    # TODO stateful and dones
+class SingleFootContactReward(ksim.StatefulReward):
     """Reward having one and only one foot in contact with the ground, while walking.
-    Allows for 0.2s grace period when both feet are in contact."""
+    Allows for small grace period when both feet are in contact for less jumpy gaits."""
 
     scale: float = 1.0
     ctrl_dt: float = 0.02
-    window_size: float = 0.2  # seconds
+    grace_period: float = 0.2  # seconds
 
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
+    def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
+        return jnp.array([0.0])
+
+    def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
         right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
         single = jnp.logical_xor(left_contact, right_contact)
 
-        k = int(self.window_size / self.ctrl_dt)
-        padded = jnp.concatenate([jnp.zeros_like(single[:, :k]), single], axis=-1)
-        window_any = (
-            jax.lax.reduce_window(
-                padded.astype(jnp.int32),
-                0,
-                jax.lax.add,
-                window_dimensions=(k + 1,),
-                window_strides=(1,),
-                padding="valid",
-            )
-            > 0
-        )
-        reward = window_any.astype(jnp.float32)
-
-        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 1.0, reward)
-        return reward
+        def _body(time_since_single_contact: Array, is_single_contact: Array) -> tuple[Array, Array]:
+            new_time = jnp.where(is_single_contact, 0.0, time_since_single_contact + self.ctrl_dt)
+            return new_time, new_time
+        
+        carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, single)
+        single_contact_grace = time_since_single_contact < self.grace_period
+        return single_contact_grace.squeeze(), carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -926,8 +917,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
-            # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
-            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True), # seems to learn to not step
+            SingleFootContactReward(scale=0.1, grace_period=0.2),
+            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
             FeetOrientationReward(scale=0.05, error_scale=0.25),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
