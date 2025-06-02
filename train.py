@@ -1291,9 +1291,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.LinearCurriculum(
-            step_size=0.05, # 200 / 0.05 = 4000 iters
-            step_every_n_epochs=200,
-            min_level=0.0,
+            step_size=1,
+            step_every_n_epochs=1,
+            min_level=1.0, # disable curriculum
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
