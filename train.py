@@ -1061,7 +1061,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=1.5),
             LinearVelocityTrackingReward(
-                scale=4.5,
+                scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
                 in_robot_frame=True,
             ),
@@ -1069,7 +1069,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
-            ksim.UprightReward(scale=0.5),
+            # ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
@@ -1077,8 +1077,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.LinkAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
-            ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
+            # ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
+            # ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
@@ -1107,7 +1107,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
-            # min_level=0.5,
+            min_level=0.1,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
