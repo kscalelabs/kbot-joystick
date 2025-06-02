@@ -683,7 +683,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(45),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -994,8 +994,7 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=2.0,
-            render_length_seconds=8.0,
+            rollout_length_seconds=8.0,
             global_grad_clip=2.0,
             learning_rate=1e-3,
             # Simulation parameters.
