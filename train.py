@@ -135,18 +135,6 @@ class ContactForcePenalty(ksim.Reward):
         return jnp.sum(cost, axis=-1)
 
 
-# @attrs.define(frozen=True, kw_only=True)
-# class FeetSlipPenalty(ksim.Reward):
-#     """Penalises COM motion while feet are in contact."""
-
-#     scale: float = -1.0
-
-#     def get_reward(self, traj: ksim.Trajectory) -> Array:
-#         vel = jnp.linalg.norm(traj.obs["center_of_mass_velocity_observation"][:, :2], axis=-1, keepdims=True)
-#         contact = traj.obs["feet_contact_observation"]
-#         return jnp.sum(vel * contact, axis=-1)
-
-
 @attrs.define(frozen=True, kw_only=True)
 class SimpleSingleFootContactReward(ksim.Reward):
     """Reward having one and only one foot in contact with the ground, while walking."""
@@ -918,18 +906,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
+            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.05, error_scale=0.25),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.02),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
-            # BentArmPenalty.create_penalty(physics_model, scale=-0.02),
-            # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            # FeetSlipPenalty(scale=-0.25),
             # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
             #     scale=-0.03,
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"), # BUG wrong sensors
