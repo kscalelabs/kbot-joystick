@@ -92,7 +92,21 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1,
         help="The minimum number of steps to wait before changing the curriculum level.",
     )
-
+    min_level: float = xax.field(
+        value=0.01,
+        help="The minimum curriculum level.",
+    )
+    
+    # Reward Weights
+    action_acc: float = xax.field(
+        value=0.02,
+        help="The weight for the action acceleration penalty.",
+    )
+    action_vel: float = xax.field(
+        value=0.02,
+        help="The weight for the action velocity penalty.",
+    )
+    
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=3e-4,
@@ -319,6 +333,19 @@ class FeetContactObservation(ksim.FeetContactObservation):
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return super().observe(state, curriculum_level, rng).flatten()
 
+@attrs.define(frozen=True, kw_only=True)
+class ActionVelocityPenalty(ksim.Reward):
+    """Penalty for large changes between consecutive actions."""
+
+    norm: xax.NormType = attrs.field(default="l2", validator=ksim.norm_validator)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        actions = trajectory.action
+        actions_zp = jnp.pad(actions, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done[..., :-1], ((1, 0),), mode="edge")[..., None]
+        actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
+        penalty = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
+        return penalty
 
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
@@ -714,7 +741,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.JointVelocityPenalty(scale=-0.02, scale_by_curriculum=True),
             ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkAccelerationPenalty(scale=-0.02, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=True),
+            ksim.ActionAccelerationPenalty(scale=-1 * self.config.action_acc, scale_by_curriculum=True),
+            ActionVelocityPenalty(scale=-1 * self.config.action_vel, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.02, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.5, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
@@ -744,7 +772,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             increase_threshold=self.config.increase_threshold,
             decrease_threshold=self.config.decrease_threshold,
             min_level_steps=self.config.min_level_steps,
-            min_level=0.01,
+            min_level=self.config.min_level,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
@@ -815,7 +843,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
         if self.config.use_acc_gyro:
             obs += [
-                imu_acc_3,  # 3
+                jnp.zeros_like(imu_acc_3),  # 3
                 imu_gyro_3,  # 3
             ]
 
