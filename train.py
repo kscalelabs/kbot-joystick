@@ -899,8 +899,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 2.0), # m/s
                 vy_range=(-0.5, 0.5), # m/s
                 wz_range=(-0.5, 0.5), # rad/s
-                bh_range=(-0.1, 0.1), # m
-                bh_standing_range=(-0.5, 0.1), # m
+                bh_range=(-0.05, 0.05), # m
+                bh_standing_range=(-0.2, 0.1), # m
                 rx_range=(-0.3, 0.3), # rad
                 ry_range=(-0.3, 0.3), # rad
                 ctrl_dt=self.config.ctrl_dt,
@@ -914,11 +914,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.5, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
+            BaseHeightReward(scale=0.15, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
+            FeetAirtimeReward(scale=0.2, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
             FeetOrientationReward(scale=0.05, error_scale=0.25),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
