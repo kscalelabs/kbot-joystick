@@ -276,11 +276,17 @@ class FeetAirtimeReward(ksim.StatefulReward):
         td_l = touchdown(left_contact)
         td_r = touchdown(right_contact)
 
-        swing_reward = (left_air - self.touchdown_penalty) * td_l.astype(jnp.float32) + (right_air - self.touchdown_penalty) * td_r.astype(jnp.float32)
+        left_air_shifted = jnp.roll(left_air, 1)
+        right_air_shifted = jnp.roll(right_air, 1)
+
+        left_feet_airtime_reward = (left_air_shifted - self.touchdown_penalty) * td_l.astype(jnp.float32) 
+        right_feet_airtime_reward = (right_air_shifted - self.touchdown_penalty) * td_r.astype(jnp.float32)
+
+        reward = left_feet_airtime_reward + right_feet_airtime_reward
 
         # standing mask
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 0.0, swing_reward)
+        reward = jnp.where(is_zero_cmd, 0.0, reward)
 
         return reward, reward_carry
 
