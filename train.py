@@ -491,6 +491,29 @@ class FeetPositionReward(ksim.Reward):
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
 
+
+@attrs.define(frozen=True)
+class FeetOrientationReward(ksim.Reward):
+    """Reward for keeping feet pitch and roll oriented parallel to the ground"""
+
+    scale: float = attrs.field(default=1.0)
+    error_scale: float = attrs.field(default=0.25)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        wz_cmd = trajectory.command["unified_command"][:, 2]
+        
+        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 23, :])
+        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 18, :])
+
+        straight_foot_euler = jnp.stack([-jnp.pi/2, 0], axis=-1) # ignore yaw
+
+        left_error = jnp.abs(left_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+        right_error = jnp.abs(right_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+
+        total_error = left_error + right_error
+        return self.scale * jnp.exp(-total_error / self.error_scale)
+
+
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     foot_left_idx: int
@@ -1238,6 +1261,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, window_size=0.0), # TODO temp 0 window size due to continuity bug dones
             FeetAirtimeReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True), # seems to learn to not step
+            FeetOrientationReward(scale=0.05, error_scale=0.5),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
