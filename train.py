@@ -66,9 +66,9 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc_gyro: bool = xax.field(
+    use_gyro: bool = xax.field(
         value=True,
-        help="Whether to use the IMU acceleration and gyroscope observations.",
+        help="Whether to use the IMU gyroscope observations.",
     )
     gait_freq_range: tuple[float, float] = xax.field(
         value=(1.2, 1.5),
@@ -1061,7 +1061,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Standard rewards.
             ksim.StayAliveReward(scale=1.5),
             LinearVelocityTrackingReward(
-                scale=1.0,
+                scale=1.5,
                 stand_still_threshold=self.config.stand_still_threshold,
                 in_robot_frame=True,
             ),
@@ -1084,7 +1084,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
-            FeetSlipPenalty(scale=-0.25),
+            FeetSlipPenalty(scale=-0.02),
             ContactForcePenalty(
                 scale=-0.03,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
@@ -1116,8 +1116,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # timestep phase + joint pos / vel + proj_grav
         num_actor_obs = 4 + num_joints * 2 + 3
 
-        if self.config.use_acc_gyro:
-            num_actor_obs += 6
+        if self.config.use_gyro:
+            num_actor_obs += 3
 
         num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
@@ -1137,8 +1137,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 3  # imu_acc/gyro (privileged copies)
         )
 
-        if self.config.use_acc_gyro:
-            num_critic_inputs -= 6
+        if self.config.use_gyro:
+            num_critic_inputs -= 3
 
         return Model(
             key,
@@ -1179,9 +1179,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ang_vel_cmd,  # 1
             gait_freq_cmd_1,  # 1
         ]
-        if self.config.use_acc_gyro:
+        if self.config.use_gyro:
             obs += [
-                imu_acc_3,  # 3
                 imu_gyro_3,  # 3
             ]
 
