@@ -89,7 +89,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
     )
     min_level_steps: int = xax.field(
-        value=1,
+        value=10,
         help="The minimum number of steps to wait before changing the curriculum level.",
     )
     min_level: float = xax.field(
@@ -994,7 +994,8 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=8.0,
+            rollout_length_seconds=2.0,
+            render_length_seconds=8.0,
             global_grad_clip=2.0,
             learning_rate=1e-3,
             # Simulation parameters.
