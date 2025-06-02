@@ -1059,9 +1059,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            ksim.StayAliveReward(scale=1.5),
+            ksim.StayAliveReward(scale=0.5),
             LinearVelocityTrackingReward(
-                scale=1.5,
+                scale=2.5,
                 stand_still_threshold=self.config.stand_still_threshold,
                 in_robot_frame=True,
             ),
