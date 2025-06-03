@@ -174,7 +174,9 @@ class SingleFootContactReward(ksim.StatefulReward):
         
         carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, single)
         single_contact_grace = time_since_single_contact < self.grace_period
-        return single_contact_grace.squeeze(), carry
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
+        reward = jnp.where(is_zero_cmd, 0.0, single_contact_grace.squeeze())
+        return reward, carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -887,8 +889,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 2.0), # m/s
                 vy_range=(-0.5, 0.5), # m/s
                 wz_range=(-0.5, 0.5), # rad/s
-                bh_range=(-0.05, 0.05), # m
-                bh_standing_range=(-0.2, 0.1), # m
+                # bh_range=(-0.05, 0.05), # m
+                # bh_standing_range=(-0.2, 0.1), # m
+                bh_range=(0.0, 0.0), # m # disabled for now, does not work on this robot. reward conflicts
+                bh_standing_range=(0.0, 0.0), # m
                 rx_range=(-0.3, 0.3), # rad
                 ry_range=(-0.3, 0.3), # rad
                 ctrl_dt=self.config.ctrl_dt,
@@ -902,7 +906,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.15, error_scale=0.05, standard_height=0.9), # set at .9 for now to encourage knee flex
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.92), # set at .9 for now to encourage knee flex
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
