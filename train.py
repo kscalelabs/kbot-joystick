@@ -908,10 +908,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.92), # set at .9 for now to encourage knee flex
             # shaping
-            # SimpleSingleFootContactReward(scale=0.1),
-            SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
+            SimpleSingleFootContactReward(scale=0.1),
+            # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward(scale=0.05, error_scale=0.25),
+            FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.02),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
