@@ -65,10 +65,8 @@ def main() -> None:
         joint_angles: Array,
         joint_angular_velocities: Array,
         projected_gravity: Array,
-        accelerometer: Array,
         gyroscope: Array,
         time: Array,
-        command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
         steps = time / CTRL_DT
@@ -78,7 +76,7 @@ def main() -> None:
         phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
 
         # Stand still case
-        joystick_cmd = command
+        joystick_cmd = jnp.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0])
         is_stand_still_command = joystick_cmd[..., 0] == 1.0
         phase = jnp.where(
             is_stand_still_command,
@@ -94,9 +92,10 @@ def main() -> None:
                 joint_angles,
                 joint_angular_velocities,
                 projected_gravity,
-                command,
+                jnp.array([1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
                 GAIT_FREQ,
-                accelerometer,
+                jnp.array([0.0, 0.0, 0.0]),
+                gyroscope,
             ],
             axis=-1,
         )
