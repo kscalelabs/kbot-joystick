@@ -237,13 +237,14 @@ class AlternatingSingleFootReward(ksim.StatefulReward):
         k = int(self.window_size / self.ctrl_dt)
         return xax.FrozenDict({"window": jnp.zeros((k,), dtype=jnp.int8)})
 
-    def get_reward_stateful(self, traj: ksim.Trajectory, carry: xax.FrozenDict[str, Array]) -> tuple[Array, xax.FrozenDict[str, Array]]:
+    def get_reward_stateful(
+        self, traj: ksim.Trajectory, carry: xax.FrozenDict[str, Array]
+    ) -> tuple[Array, xax.FrozenDict[str, Array]]:
         def _single_timestep_reward(
-            window: Array, 
-            timestep_data: tuple[Array, Array, Array, Array, Array]
+            window: Array, timestep_data: tuple[Array, Array, Array, Array, Array]
         ) -> tuple[Array, Array]:
             contact, foot_pos, v_cmd, w_cmd, done = timestep_data
-            
+
             # Calculate foot contact states
             left = jnp.any(contact[:2] > 0.5)
             right = jnp.any(contact[2:] > 0.5)
@@ -282,7 +283,7 @@ class AlternatingSingleFootReward(ksim.StatefulReward):
             standing = cmd_mag <= self.stand_still_threshold
 
             reward = jnp.where(standing | alternating, 1.0, 0.0)
-            
+
             return new_window, reward
 
         if self.feet_pos_obs_name not in traj.obs:
@@ -290,73 +291,72 @@ class AlternatingSingleFootReward(ksim.StatefulReward):
 
         # Prepare timestep data
         contact = traj.obs[self.feet_contact_obs_name]  # (time, 4)
-        foot_pos = traj.obs[self.feet_pos_obs_name]     # (time, 6)
+        foot_pos = traj.obs[self.feet_pos_obs_name]  # (time, 6)
         v_cmd = traj.command[self.linear_velocity_cmd_name]  # (time, 2)
-        w_cmd = traj.command[self.angular_velocity_cmd_name] # (time, 1)
+        w_cmd = traj.command[self.angular_velocity_cmd_name]  # (time, 1)
         done = traj.done  # (time,)
 
         timestep_data = (contact, foot_pos, v_cmd, w_cmd, done)
 
         # Use scan to process each timestep
-        final_window, rewards = jax.lax.scan(
-            _single_timestep_reward,
-            carry["window"],
-            timestep_data
-        )
+        final_window, rewards = jax.lax.scan(_single_timestep_reward, carry["window"], timestep_data)
 
         return rewards * self.scale, xax.FrozenDict({"window": final_window})
 
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.Reward):
-    """Encourages reasonable step frequency by rewarding foot airtime.
+    """Encourages the robot to swing its legs.
 
-    Each foot accumulates a *positive* reward proportional to the duration it
-    spends in the air (i.e. not in contact).  Whenever the foot touches the
-    ground a small fixed penalty (``touchdown_penalty``) is applied.  This leads
-    to larger rewards for longer swing phases while discouraging excessively
-    rapid stepping.
+    Each foot accumulates airtime (capped at max_airtime_seconds) until it hits the ground.
+    The reward is the airtime minus a penalty for touching down.
     """
 
     scale: float = 1.0
     feet_contact_obs_name: str = "feet_contact_observation"
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
+    stand_still_threshold: float = 0.01
+    max_airtime_seconds: float = 0.5
 
-    def _airtime_sequence(self, contact_bool: Array) -> Array:
-        """Returns an array with the airtime (in seconds) for each timestep."""
+    def _airtime_sequence(self, contact: Array) -> Array:
+        """Running counter (seconds) since last liftoff *at every frame*."""
 
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
-            new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
-            return new_time, new_time
+            out = jnp.where(is_contact, time_since_liftoff, time_since_liftoff + self.ctrl_dt)
+            new = jnp.where(is_contact, 0.0, out)
+            return new, out
 
-        _, airtime = jax.lax.scan(_body, 0.0, contact_bool)
+        _, airtime = jax.lax.scan(_body, 0.0, contact)
         return airtime
+
+    def _touchdown_flag(self, contact: Array) -> Array:
+        prev = jnp.concatenate([jnp.zeros(1, dtype=bool), contact[:-1]])
+        return jnp.logical_and(contact, jnp.logical_not(prev))  # 0→1 edge
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         contact = traj.obs[self.feet_contact_obs_name]
         left_in, right_in = contact[..., 0] > 0.5, contact[..., 1] > 0.5
 
-        # airtime counters
-        left_air = self._airtime_sequence(left_in)
-        right_air = self._airtime_sequence(right_in)
+        left_air = jnp.minimum(self._airtime_sequence(left_in), self.max_airtime_seconds)
+        right_air = jnp.minimum(self._airtime_sequence(right_in), self.max_airtime_seconds)
 
-        # touchdown boolean (0→1 transition)
-        def touchdown(c: Array) -> Array:
-            prev = jnp.concatenate([jnp.array([False]), c[:-1]])
-            return jnp.logical_and(c, jnp.logical_not(prev))
+        td_l = self._touchdown_flag(left_in)
+        td_r = self._touchdown_flag(right_in)
 
-        td_l = touchdown(left_in)
-        td_r = touchdown(right_in)
+        # Swing bonus
+        swing_bonus = (~left_in).astype(jnp.float32) * left_air + (~right_in).astype(jnp.float32) * right_air
 
-        swing_reward = (left_air - 0.4) * td_l.astype(jnp.float32) + (right_air - 0.4) * td_r.astype(jnp.float32)
+        # Penalty on touchdown
+        penalty = (td_l.astype(jnp.float32) + td_r.astype(jnp.float32)) * self.touchdown_penalty
 
-        # standing mask
-        stand = (jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < 1e-3) & (
-            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < 1e-3
+        swing_reward = swing_bonus - penalty
+
+        # Zero reward when standing still
+        stand = (jnp.linalg.norm(traj.command["linear_velocity_command"], axis=-1) < self.stand_still_threshold) & (
+            jnp.abs(traj.command["angular_velocity_command"][..., 0]) < self.stand_still_threshold
         )
-
-        return jnp.where(stand, 1.0, swing_reward)
+        return jnp.where(stand, 0.0, swing_reward)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -950,10 +950,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
             ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.JointDampingRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.05),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
+            ksim.ArmatureRandomizer(scale_lower=0.1, scale_upper=10.0),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
+            ksim.JointDampingRandomizer(scale_lower=0.1, scale_upper=10.0),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
             ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.3, scale_upper=1.5
             ),
@@ -962,30 +962,34 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_linvel=1.0,
-                y_linvel=1.0,
-                z_linvel=0.3,
-                vel_range=(0.3, 1.5),
-                x_angvel=4.0,
-                y_angvel=4.0,
-                z_angvel=4.0,
-                interval_range=(3.0, 8.0),
+                x_linvel=0.7,
+                y_linvel=0.7,
+                z_linvel=0.7,
+                vel_range=(0.5, 2.0),
+                x_angvel=0.7,
+                y_angvel=0.7,
+                z_angvel=0.7,
+                interval_range=(2.0, 4.0),
+            ),
+            ksim.JumpEvent(
+                jump_height_range=(0.0, 0.3),
+                interval_range=(3.0, 15.0),
             ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=0.3),
+            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=math.radians(45)),
             ksim.RandomJointVelocityReset(),
+            ksim.RandomHeightReset(range=(0.0, 0.3)),
             ksim.RandomBaseVelocityXYReset(scale=0.3),
-            ksim.RandomJointVelocityReset(scale=0.3),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             TimestepPhaseObservation(),
-            ksim.JointPositionObservation(noise=math.radians(2)),
-            ksim.JointVelocityObservation(noise=math.radians(100)),
+            ksim.JointPositionObservation(noise=math.radians(3)),
+            ksim.JointVelocityObservation(noise=math.radians(90)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -1000,17 +1004,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.05,
+                noise=0.2,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_acc",
-                noise=0.1,
+                noise=0.0,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(45),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -1069,7 +1073,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=1.0,
                 stand_still_threshold=self.config.stand_still_threshold,
             ),
-            # ksim.UprightReward(scale=0.5),
+            ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
             # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
@@ -1084,14 +1088,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
-            # FeetSlipPenalty(scale=-0.02, scale_by_curriculum=True),
+            FeetSlipPenalty(scale=-0.02, scale_by_curriculum=True),
             # ContactForcePenalty(
             #     scale=-0.03,
             #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             # ),
             # StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
             # AlternatingSingleFootReward(scale=2.1),
-            # FeetAirtimeReward(scale=1.5, touchdown_penalty=0.01, scale_by_curriculum=True),
+            FeetAirtimeReward(
+                scale=1.5,
+                touchdown_penalty=0.01,
+                stand_still_threshold=self.config.stand_still_threshold,
+                scale_by_curriculum=True,
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -1164,7 +1173,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
