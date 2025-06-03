@@ -392,6 +392,8 @@ class BaseHeightReward(ksim.Reward):
         commanded_height = trajectory.command["unified_command"][:, 8] + self.standard_height
         
         height_error = jnp.abs(current_height - commanded_height)
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        height_error = jnp.where(is_zero_cmd, height_error, height_error**2) # smooth kernel for walking.
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -906,7 +908,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.92), # set at .92 for now to encourage knee flex
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.95),
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
