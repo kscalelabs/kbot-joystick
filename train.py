@@ -1059,7 +1059,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # Standard rewards.
-            ksim.StayAliveReward(scale=0.5),
+            # ksim.StayAliveReward(scale=0.5),
             LinearVelocityTrackingReward(
                 scale=2.5,
                 stand_still_threshold=self.config.stand_still_threshold,
@@ -1071,11 +1071,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             # ksim.UprightReward(scale=0.5),
             # Normalisation penalties.
-            ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
+            # ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.001, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.JointJerkPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
-            ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
+            # ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             # ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
@@ -1084,14 +1084,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             StraightLegPenalty.create_penalty(physics_model, scale=-0.3),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
-            FeetSlipPenalty(scale=-0.02),
-            ContactForcePenalty(
-                scale=-0.03,
-                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            ),
+            # FeetSlipPenalty(scale=-0.02, scale_by_curriculum=True),
+            # ContactForcePenalty(
+            #     scale=-0.03,
+            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            # ),
             # StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
             # AlternatingSingleFootReward(scale=2.1),
-            FeetAirtimeReward(scale=1.5, touchdown_penalty=0.01, scale_by_curriculum=True),
+            # FeetAirtimeReward(scale=1.5, touchdown_penalty=0.01, scale_by_curriculum=True),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -1335,7 +1335,7 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=2.0,
+            rollout_length_seconds=8.0,
             global_grad_clip=2.0,
             # Simulation parameters.
             dt=0.002,
