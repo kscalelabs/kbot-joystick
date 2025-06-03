@@ -210,6 +210,24 @@ class FeetSlipPenalty(ksim.Reward):
         contact = traj.obs[self.feet_contact_obs_name]
         return jnp.sum(vel * contact, axis=-1)
 
+@attrs.define(frozen=True)
+class FeetOrientationReward(ksim.Reward):
+    """Reward for keeping feet pitch and roll oriented parallel to the ground"""
+
+    scale: float = attrs.field(default=1.0)
+    error_scale: float = attrs.field(default=0.25)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:        
+        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 23, :])
+        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 18, :])
+
+        straight_foot_euler = jnp.stack([-jnp.pi/2, 0], axis=-1) # ignore yaw
+
+        left_error = jnp.abs(left_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+        right_error = jnp.abs(right_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+
+        total_error = left_error + right_error
+        return jnp.exp(-total_error / self.error_scale)
 
 @attrs.define(frozen=True, kw_only=True)
 class AlternatingSingleFootReward(ksim.StatefulReward):
@@ -1080,6 +1098,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.JointJerkPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.ActionAccelerationPenalty(scale=-0.001, scale_by_curriculum=True),
+            ksim.ActionVelocityPenalty(scale=-0.2, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.AngularVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
             # ksim.LinearVelocityPenalty(index=("x", "y", "z"), scale=-0.0005, scale_by_curriculum=True),
@@ -1089,15 +1108,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             # FeetPhaseReward(scale=2.1, max_foot_height=0.18, stand_still_threshold=self.config.stand_still_threshold),
             FeetSlipPenalty(scale=-0.02, scale_by_curriculum=True),
-            # ContactForcePenalty(
-            #     scale=-0.03,
-            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            # ),
+            ContactForcePenalty(
+                scale=-0.03,
+                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            ),
+            FeetOrientationReward(scale=0.1, error_scale=0.25),
             # StandStillReward(scale=1.0, stand_still_threshold=self.config.stand_still_threshold),
             # AlternatingSingleFootReward(scale=2.1),
             FeetAirtimeReward(
                 scale=1.5,
-                touchdown_penalty=0.01,
+                touchdown_penalty=0.2,
                 stand_still_threshold=self.config.stand_still_threshold,
                 scale_by_curriculum=True,
             ),
@@ -1122,13 +1142,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_model(self, key: PRNGKeyArray) -> Model:
         num_joints = len(ZEROS)
 
-        # timestep phase + joint pos / vel + proj_grav
-        num_actor_obs = 4 + num_joints * 2 + 3
+        # oint pos / vel + proj_grav
+        num_actor_obs = num_joints * 2 + 3
 
         if self.config.use_gyro:
             num_actor_obs += 3
 
-        num_commands = 2 + 1 + 1  # lin vel + ang vel + gait frequency
+        num_commands = 2 + 1 # + 1  # lin vel + ang vel + gait frequency
         num_actor_inputs = num_actor_obs + num_commands
 
         num_critic_inputs = (
@@ -1169,23 +1189,23 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[distrax.Distribution, Array]:
-        timestep_phase_4 = observations["timestep_phase_observation"]
+        # timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
-        gait_freq_cmd_1 = commands["gait_frequency_command"]
+        # gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         obs = [
-            timestep_phase_4,  # 4
+            # timestep_phase_4,  # 4
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             proj_grav_3,  # 3
             lin_vel_cmd_2,  # 2
             ang_vel_cmd,  # 1
-            gait_freq_cmd_1,  # 1
+            # gait_freq_cmd_1,  # 1
         ]
         if self.config.use_gyro:
             obs += [
@@ -1204,13 +1224,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[Array, Array]:
-        timestep_phase_4 = observations["timestep_phase_observation"]
+        # timestep_phase_4 = observations["timestep_phase_observation"]
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
         lin_vel_cmd_2 = commands["linear_velocity_command"]
         ang_vel_cmd = commands["angular_velocity_command"]
-        gait_freq_cmd_1 = commands["gait_frequency_command"]
+        # gait_freq_cmd_1 = commands["gait_frequency_command"]
 
         # privileged obs
         imu_acc_3 = observations["sensor_observation_imu_acc"]
@@ -1227,7 +1247,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs_n = jnp.concatenate(
             [
-                timestep_phase_4,  # 4
+                # timestep_phase_4,  # 4
                 joint_pos_n,
                 joint_vel_n / 10.0,
                 com_inertia_n,
@@ -1244,7 +1264,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 feet_position_6,
                 lin_vel_cmd_2,
                 ang_vel_cmd,
-                gait_freq_cmd_1,
+                # gait_freq_cmd_1,
             ],
             axis=-1,
         )
