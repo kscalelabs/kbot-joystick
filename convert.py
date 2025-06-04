@@ -67,7 +67,7 @@ def main() -> None:
                 joint_angular_velocities,
                 projected_gravity,
                 command,
-                accelerometer,
+                # accelerometer,
                 gyroscope,
             ],
             axis=-1,

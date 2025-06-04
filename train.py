@@ -950,7 +950,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         num_actor_obs = num_joints * 2 + 3
 
         if self.config.use_acc_gyro:
-            num_actor_obs += 6
+            num_actor_obs += 3
 
         num_commands = (
             2  # linear velocity command (x, y)
@@ -1002,7 +1002,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
@@ -1017,7 +1017,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
         if self.config.use_acc_gyro:
             obs += [
-                imu_acc_3,  # 3
+                # imu_acc_3,  # 3
                 imu_gyro_3,  # 3
             ]
 
@@ -1036,7 +1036,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         proj_grav_3 = observations["projected_gravity_observation"]
-        imu_acc_3 = observations["sensor_observation_imu_acc"]
+        # imu_acc_3 = observations["sensor_observation_imu_acc"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
@@ -1064,7 +1064,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 jnp.zeros_like(cmd[..., 3:4]),
                 cmd[..., 4:],
 
-                imu_acc_3, # m/s^2
+                # imu_acc_3, # m/s^2
                 imu_gyro_3, # rad/s
                 # privileged obs:
                 com_inertia_n,
