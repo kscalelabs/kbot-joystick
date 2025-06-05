@@ -14,8 +14,7 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-GAIT_FREQ = jnp.array([1.2])
-CTRL_DT = 0.02
+NUM_COMMANDS_MODEL = 11
 
 
 def make_export_model(model: Model) -> Callable:
@@ -46,8 +45,9 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth, task.config.hidden_size)
-    num_commands = 3  # lin vel + ang vel
+    carry_shape = (task.config.depth, task.config.hidden_size) # (3, 128) hiddens
+    num_joints = len(joint_names) # 20, joints outputs
+    num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
@@ -64,28 +64,19 @@ def main() -> None:
         joint_angles: Array,
         joint_angular_velocities: Array,
         projected_gravity: Array,
+        command: Array,
         accelerometer: Array,
         gyroscope: Array,
-        time: Array,
-        command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        steps = time / CTRL_DT
-        phase_dt = 2 * jnp.pi * GAIT_FREQ * CTRL_DT
-        start_phase = jnp.array([0, jnp.pi])
-        phase = start_phase + steps * phase_dt
-        phase = jnp.fmod(phase + jnp.pi, 2 * jnp.pi) - jnp.pi
-        timestep_phase_4 = jnp.array([jnp.cos(phase), jnp.sin(phase)]).flatten()
-
         obs = jnp.concatenate(
             [
-                timestep_phase_4,
                 joint_angles,
                 joint_angular_velocities,
                 projected_gravity,
                 command,
-                GAIT_FREQ,
-                accelerometer,
+                # accelerometer,
+                gyroscope,
             ],
             axis=-1,
         )
