@@ -748,7 +748,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
             ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
             # Bespoke rewards.
-            BentArmPenalty.create_penalty(physics_model, scale=-0.1),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.5),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.1),
             FeetPhaseReward(scale=1.0, max_foot_height=0.18),
