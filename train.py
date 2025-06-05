@@ -898,7 +898,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 rx_range=(-0.3, 0.3), # rad
                 ry_range=(-0.3, 0.3), # rad
                 ctrl_dt=self.config.ctrl_dt,
-                switch_prob=self.config.ctrl_dt / 3, # once per 3 seconds
+                switch_prob=self.config.ctrl_dt / 5, # once per x seconds
             ),
         ]
 
@@ -908,7 +908,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.95),
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=1.0),
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
