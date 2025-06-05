@@ -45,8 +45,8 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth, task.config.hidden_size) # (3, 128) hiddens
-    num_joints = len(joint_names) # 20, joints outputs
+    carry_shape = (task.config.depth, task.config.hidden_size)  # (3, 128) hiddens
+    # num_joints = len(joint_names)  # 20, joints outputs
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
