@@ -534,9 +534,9 @@ class UnifiedLinearVelocityCommandMarker(ksim.vis.Marker):
 
     command_name: str = attrs.field()
     size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=1.0)
+    arrow_scale: float = attrs.field(default=0.1)
     height: float = attrs.field(default=0.5)
-    base_length: float = attrs.field(default=0.1)
+    base_length: float = attrs.field(default=0.25)
 
     def update(self, trajectory: ksim.Trajectory) -> None:
         cmd = trajectory.command[self.command_name]
@@ -561,9 +561,9 @@ class UnifiedLinearVelocityCommandMarker(ksim.vis.Marker):
         cls,
         command_name: str,
         *,
-        arrow_scale: float = 0.75,
+        arrow_scale: float = 0.1,
         height: float = 0.5,
-        base_length: float = 0.1,
+        base_length: float = 0.25,
     ) -> Self:
         return cls(
             command_name=command_name,
@@ -578,41 +578,43 @@ class UnifiedLinearVelocityCommandMarker(ksim.vis.Marker):
 
 
 @attrs.define(kw_only=True)
-class UnifiedAngularVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the angular velocity command from unified command."""
+class UnifiedAbsoluteYawCommandMarker(ksim.vis.Marker):
+    """Visualise the absolute yaw command from unified command."""
 
     command_name: str = attrs.field()
     size: float = attrs.field(default=0.02)
     height: float = attrs.field(default=0.7)
-    arrow_scale: float = attrs.field(default=2.0)
-    base_length: float = attrs.field(default=0.08)
+    arrow_scale: float = attrs.field(default=0.1)
+    base_length: float = attrs.field(default=0.25)
 
     def update(self, trajectory: ksim.Trajectory) -> None:
         cmd = trajectory.command[self.command_name]
-        wz = float(cmd[2])
+        yaw = float(cmd[2])  # yaw command is in position 2
         self.pos = (0.0, 0.0, self.height)
 
         # Always show arrow with base length plus scaling
         self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        arrow_length = self.base_length + self.arrow_scale * abs(wz)
+        arrow_length = self.base_length + self.arrow_scale * abs(yaw)
         self.scale = (self.size, self.size, arrow_length)
 
-        if abs(wz) < 1e-4:  # zero command → point up, grey color
-            self.orientation = self.quat_from_direction((0.0, 0.0, 1.0))
+        if abs(yaw) < 1e-4:  # zero command → point forward, grey color
+            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
             self.rgba = (0.8, 0.8, 0.8, 0.8)
-        else:  # non-zero command → up for CCW, down for CW, purple color
-            direction = (0.0, 0.0, 1.0) if wz > 0 else (0.0, 0.0, -1.0)
-            self.orientation = self.quat_from_direction(direction)
-            self.rgba = (0.8, 0.2, 0.8, 0.8)
+        else:  # non-zero command → point in yaw direction, blue color
+            # Convert yaw to direction vector (rotate around z-axis)
+            direction_x = jnp.cos(yaw)
+            direction_y = jnp.sin(yaw)
+            self.orientation = self.quat_from_direction((float(direction_x), float(direction_y), 0.0))
+            self.rgba = (0.2, 0.2, 0.8, 0.8)
 
     @classmethod
     def get(
         cls,
         command_name: str,
         *,
-        arrow_scale: float = 2.0,
+        arrow_scale: float = 0.1,
         height: float = 0.7,
-        base_length: float = 0.08,
+        base_length: float = 0.25,
     ) -> Self:
         return cls(
             command_name=command_name,
@@ -622,7 +624,7 @@ class UnifiedAngularVelocityCommandMarker(ksim.vis.Marker):
             arrow_scale=arrow_scale,
             height=height,
             base_length=base_length,
-            track_rotation=True,
+            track_rotation=False,
         )
 
 
@@ -712,15 +714,13 @@ class UnifiedCommand(ksim.Command):
     def get_markers(self) -> list[ksim.vis.Marker]:
         """Return markers for visualizing the unified command components."""
         return [
+            UnifiedAbsoluteYawCommandMarker.get(
+                command_name=self.command_name,
+                height=0.7,
+            ),
             UnifiedLinearVelocityCommandMarker.get(
                 command_name=self.command_name,
-                arrow_scale=0.75,
                 height=0.5,
-            ),
-            UnifiedAngularVelocityCommandMarker.get(
-                command_name=self.command_name,
-                arrow_scale=2.0,
-                height=0.7,
             ),
         ]
 
