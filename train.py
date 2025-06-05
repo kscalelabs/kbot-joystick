@@ -673,7 +673,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.2,
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -683,7 +683,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(30),
+                noise=math.radians(20),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -733,8 +733,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 in_robot_frame=True,
                 command_name="switching_joystick_command",
             ),
-            ksim.UprightReward(scale=2.5),
-            ksim.BaseHeightReward(height_target=1.05, scale=1.0),
+            ksim.UprightReward(scale=3.0),
+            ksim.BaseHeightReward(height_target=1.05, scale=1.2),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.02, scale_by_curriculum=True),
