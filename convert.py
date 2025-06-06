@@ -11,11 +11,11 @@ from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
-import jax.numpy as jnp
 
 from train import HumanoidWalkingTask, Model
 
 NUM_COMMANDS_MODEL = 6  # Updated to match unified command structure
+
 
 def euler_to_quat(euler_3: Array) -> Array:
     """Converts roll, pitch, yaw angles to a quaternion (w, x, y, z).
@@ -51,25 +51,29 @@ def euler_to_quat(euler_3: Array) -> Array:
 
     return quat
 
+
 def rotate_quat(q1: Array, q2: Array) -> Array:
     """Rotate quaternion q1 by quaternion q2.
-    
+
     Args:
         q1: quaternion to be rotated [w, x, y, z]
         q2: quaternion to rotate by [w, x, y, z]
-    
+
     Returns:
         rotated quaternion [w, x, y, z]
     """
     w1, x1, y1, z1 = q1
     w2, x2, y2, z2 = q2
-    
-    return jnp.array([
-        w1*w2 - x1*x2 - y1*y2 - z1*z2,  # w
-        w1*x2 + x1*w2 + y1*z2 - z1*y2,  # x
-        w1*y2 - x1*z2 + y1*w2 + z1*x2,  # y
-        w1*z2 + x1*y2 - y1*x2 + z1*w2   # z
-    ])
+
+    return jnp.array(
+        [
+            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,  # w
+            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,  # x
+            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,  # y
+            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,  # z
+        ]
+    )
+
 
 def quat_to_euler(quat_4: Array, eps: float = 1e-6) -> Array:
     """Normalizes and converts a quaternion (w, x, y, z) to roll, pitch, yaw.
@@ -105,6 +109,7 @@ def quat_to_euler(quat_4: Array, eps: float = 1e-6) -> Array:
     yaw = jnp.arctan2(siny_cosp, cosy_cosp)
 
     return jnp.concatenate([roll, pitch, yaw], axis=-1)
+
 
 def make_export_model(model: Model) -> Callable:
     def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
@@ -173,14 +178,14 @@ def main() -> None:
 
         obs = jnp.concatenate(
             [
-                joint_angles,                    # NUM_JOINTS (20)
-                joint_angular_velocities,        # NUM_JOINTS (20)
-                projected_gravity,               # 3
-                cmd_velocity,                    # 3 (vx, vy, yaw)
-                cmd_base_height,                 # 1 (disabled, zeros)
-                cmd_orientation,                 # 2 (rx, ry)
-                base_yaw_quaternion,             # 4 (w, x, y, z)
-                gyroscope,                       # 3
+                joint_angles,  # NUM_JOINTS (20)
+                joint_angular_velocities,  # NUM_JOINTS (20)
+                projected_gravity,  # 3
+                cmd_velocity,  # 3 (vx, vy, yaw)
+                cmd_base_height,  # 1 (disabled, zeros)
+                cmd_orientation,  # 2 (rx, ry)
+                base_yaw_quaternion,  # 4 (w, x, y, z)
+                gyroscope,  # 3
             ],
             axis=-1,
         )

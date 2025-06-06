@@ -369,26 +369,26 @@ class YawTrackingReward(ksim.Reward):
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         yaw = xax.quat_to_euler(traj.xquat[:, 1, :])[:, 2]
         yaw_cmd = traj.command[self.cmd_name][:, 2]
-        
+
         yaw_error = yaw - yaw_cmd
         yaw_error = jnp.where(yaw_error > math.pi, yaw_error - 2 * math.pi, yaw_error)
         yaw_error = jnp.where(yaw_error < -math.pi, yaw_error + 2 * math.pi, yaw_error)
-        
+
         position_reward = jnp.exp(-(yaw_error**2) / self.error_scale)
-        
+
         ang_vel_z = traj.obs["base_angular_velocity_observation"][:, 2]
-        
+
         desired_ang_vel_sign = -jnp.sign(yaw_error)
-        
+
         ang_vel_correctness = ang_vel_z * desired_ang_vel_sign
         ang_vel_reward = jnp.exp(-jnp.maximum(0, -ang_vel_correctness) / self.angvel_scale)
-        
+
         yaw_error_magnitude = jnp.abs(yaw_error)
         angvel_mask = yaw_error_magnitude > 0.1
         ang_vel_reward = jnp.where(angvel_mask, ang_vel_reward, 1.0)
-        
+
         combined_reward = (1.0 - self.angvel_weight) * position_reward + self.angvel_weight * ang_vel_reward
-        
+
         return combined_reward
 
 
@@ -672,11 +672,11 @@ class UnifiedCommand(ksim.Command):
         # cmd  = [vx, vy, yaw, bh, rx, ry]
         vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
         vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
-        
+
         # Initial yaw target - start from current yaw if available, otherwise random
         current_yaw = xax.quat_to_euler(physics_data.xquat[1])[2] if physics_data.xquat.shape[0] > 1 else 0.0
         yaw = jax.random.uniform(rng_d, (1,), minval=current_yaw - 0.5, maxval=current_yaw + 0.5)
-        
+
         bh = jax.random.uniform(rng_e, (1,), minval=self.bh_range[0], maxval=self.bh_range[1])
         bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
@@ -718,23 +718,19 @@ class UnifiedCommand(ksim.Command):
     def _update_yaw_smoothly(self, prev_yaw: Array, rng: PRNGKeyArray) -> Array:
         """Update yaw target smoothly with occasional direction changes."""
         rng_direction, rng_rate = jax.random.split(rng)
-        
+
         # Decide whether to change direction
         change_direction = jax.random.bernoulli(rng_direction, self.yaw_direction_switch_prob)
-        
+
         # Sample a yaw rate (how fast to rotate)
-        yaw_rate = jax.random.uniform(
-            rng_rate, (), 
-            minval=self.yaw_rate_range[0], 
-            maxval=self.yaw_rate_range[1]
-        )
-        
+        yaw_rate = jax.random.uniform(rng_rate, (), minval=self.yaw_rate_range[0], maxval=self.yaw_rate_range[1])
+
         # If changing direction, flip the sign of the rate
         yaw_rate = jnp.where(change_direction, -yaw_rate, yaw_rate)
-        
+
         # Update yaw target
         new_yaw = prev_yaw + yaw_rate * self.ctrl_dt
-        
+
         # Wrap to [-π, π]
         return self._wrap_yaw(new_yaw)
 
@@ -742,32 +738,30 @@ class UnifiedCommand(ksim.Command):
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
         rng_switch, rng_new, rng_yaw = jax.random.split(rng, 3)
-        
+
         # Decide whether to switch to completely new command
         switch_mask = jax.random.bernoulli(rng_switch, self.switch_prob)
-        
+
         # Generate completely new command
         new_command = self.initial_command(physics_data, curriculum_level, rng_new)
-        
+
         # Or smoothly update the existing command (only update yaw smoothly)
-        smooth_command = prev_command.at[2].set(
-            self._update_yaw_smoothly(prev_command[2], rng_yaw)
-        )
-        
+        smooth_command = prev_command.at[2].set(self._update_yaw_smoothly(prev_command[2], rng_yaw))
+
         # Determine which command to use based on mode
         prev_yaw = prev_command[2]
         prev_linear_speed = jnp.linalg.norm(prev_command[:2])
-        
+
         # Check if we're in a rotation-focused mode (low linear velocity, non-zero yaw)
         is_rotating_mode = jnp.logical_and(
             prev_linear_speed < 0.1,  # Low linear velocity
-            jnp.abs(prev_yaw) > 0.1   # Non-zero yaw command
+            jnp.abs(prev_yaw) > 0.1,  # Non-zero yaw command
         )
-        
+
         # For rotating modes, prefer smooth updates; for others, allow more switching
         effective_switch_prob = jnp.where(is_rotating_mode, self.switch_prob * 0.3, self.switch_prob)
         switch_mask = jax.random.bernoulli(rng_switch, effective_switch_prob)
-        
+
         # Choose between new command and smoothly updated command
         return jnp.where(switch_mask, new_command, smooth_command)
 
