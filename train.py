@@ -359,16 +359,37 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class YawTrackingReward(ksim.Reward):
-    """Reward for tracking the yaw using quaternion-based error computation."""
+    """Reward for tracking the yaw using quaternion-based error computation with angular velocity component."""
 
     error_scale: float = 0.2
-    cmd_name: str = "unified_command"  # index 2 is ψ_target
+    angvel_scale: float = 0.1
+    angvel_weight: float = 0.3
+    cmd_name: str = "unified_command"
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         yaw = xax.quat_to_euler(traj.xquat[:, 1, :])[:, 2]
         yaw_cmd = traj.command[self.cmd_name][:, 2]
-        err = jnp.where(yaw - yaw_cmd > math.pi, yaw - yaw_cmd - 2 * math.pi, yaw - yaw_cmd)
-        return jnp.exp(-(err**2) / self.error_scale)
+        
+        yaw_error = yaw - yaw_cmd
+        yaw_error = jnp.where(yaw_error > math.pi, yaw_error - 2 * math.pi, yaw_error)
+        yaw_error = jnp.where(yaw_error < -math.pi, yaw_error + 2 * math.pi, yaw_error)
+        
+        position_reward = jnp.exp(-(yaw_error**2) / self.error_scale)
+        
+        ang_vel_z = traj.obs["base_angular_velocity_observation"][:, 2]
+        
+        desired_ang_vel_sign = -jnp.sign(yaw_error)
+        
+        ang_vel_correctness = ang_vel_z * desired_ang_vel_sign
+        ang_vel_reward = jnp.exp(-jnp.maximum(0, -ang_vel_correctness) / self.angvel_scale)
+        
+        yaw_error_magnitude = jnp.abs(yaw_error)
+        angvel_mask = yaw_error_magnitude > 0.1
+        ang_vel_reward = jnp.where(angvel_mask, ang_vel_reward, 1.0)
+        
+        combined_reward = (1.0 - self.angvel_weight) * position_reward + self.angvel_weight * ang_vel_reward
+        
+        return combined_reward
 
 
 @attrs.define(frozen=True)
@@ -405,7 +426,7 @@ class XYOrientationReward(ksim.Reward):
         ry_cmd = traj.command[self.cmd_name][:, 5]  # pitch target
         q_cmd = xax.euler_to_quat(jnp.stack([rx_cmd, ry_cmd, jnp.zeros_like(rx_cmd)], axis=-1))
 
-        # 3) quaternion “distance” (1-cos²ϑ) and gaussian kernel
+        # 3) quaternion "distance" (1-cos²ϑ) and gaussian kernel
         cos_half_angle = jnp.sum(q_cmd * q_rp, axis=-1)
         quat_err = 1.0 - cos_half_angle**2
         return jnp.exp(-quat_err / self.error_scale)
