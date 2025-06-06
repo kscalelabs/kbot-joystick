@@ -733,7 +733,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 in_robot_frame=True,
                 command_name="switching_joystick_command",
             ),
-            ksim.UprightReward(scale=3.0),
+            ksim.UprightReward(scale=5.0),
             ksim.BaseHeightReward(height_target=1.05, scale=1.2),
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
