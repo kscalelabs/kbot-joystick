@@ -744,7 +744,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ActionAccelerationPenalty(scale=-1 * self.config.action_acc, scale_by_curriculum=True),
             ActionVelocityPenalty(scale=-1 * self.config.action_vel, scale_by_curriculum=True),
             ksim.LinkJerkPenalty(scale=-0.02, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.5, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-2.5, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
             ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
             # Bespoke rewards.
