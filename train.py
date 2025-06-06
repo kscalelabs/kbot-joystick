@@ -972,16 +972,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 1  # base height
         )
 
-
-        # num_critic_inputs = (
-        #     num_actor_inputs
-        #     + 3
-        #     + 3  # imu_gyro (privileged copies)
-        # )
-
-        # if self.config.use_acc_gyro:
-        #     num_critic_inputs -= 6
-
         return Model(
             key,
             num_actor_inputs=num_actor_inputs,
