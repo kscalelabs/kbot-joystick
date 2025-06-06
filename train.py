@@ -264,6 +264,7 @@ class JointPositionPenalty(ksim.JointDeviationPenalty):
         )
 
 
+# TODO implement this as a reward with kernel
 @attrs.define(frozen=True, kw_only=True)
 class BentArmPenalty(JointPositionPenalty):
     @classmethod
@@ -489,6 +490,89 @@ class BaseHeightObservation(ksim.Observation):
         return state.physics_state.data.xpos[1, 2:]
 
 
+@attrs.define(frozen=True, kw_only=True)
+class ImuOrientationObservation(ksim.StatefulObservation):
+    """Observes the IMU orientation, back spun in yaw heading, as commanded.
+
+    This provides an approximation of reading the IMU orientation from
+    the IMU on the physical robot, backspun by commanded heading. The `framequat_name` should be the name of
+    the framequat sensor attached to the IMU.
+
+    Example: if yaw cmd = 3.14, and IMU reading is [0, 0, 0, 1], then back spun IMU heading obs is [1, 0, 0, 0]
+    
+    The policy learns to keep the IMU heading obs around [1, 0, 0, 0].
+    """
+
+    framequat_idx_range: tuple[int, int | None] = attrs.field()
+    lag_range: tuple[float, float] = attrs.field(
+        default=(0.01, 0.1),
+        validator=attrs.validators.deep_iterable(
+            attrs.validators.and_(
+                attrs.validators.ge(0.0),
+                attrs.validators.lt(1.0),
+            ),
+        ),
+    )
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        framequat_name: str,
+        lag_range: tuple[float, float] = (0.01, 0.1),
+        noise: float = 0.0,
+    ) -> Self:
+        """Create a projected gravity observation from a physics model.
+
+        Args:
+            physics_model: MuJoCo physics model
+            framequat_name: The name of the framequat sensor
+            lag_range: The range of EMA factors to use, to approximate the
+                variation in the amount of smoothing of the Kalman filter.
+            noise: The observation noise
+        """
+        sensor_name_to_idx_range = ksim.get_sensor_data_idxs_by_name(physics_model)
+        if framequat_name not in sensor_name_to_idx_range:
+            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
+            raise ValueError(f"{framequat_name} not found in model. Available:\n{options}")
+
+        return cls(
+            framequat_idx_range=sensor_name_to_idx_range[framequat_name],
+            lag_range=lag_range,
+            noise=noise,
+        )
+
+    def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        minval, maxval = self.lag_range
+        return jnp.zeros((4,)), jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+
+    def observe_stateful(
+        self,
+        state: ksim.ObservationInput,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, tuple[Array, Array]]:
+        framequat_start, framequat_end = self.framequat_idx_range
+        framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
+
+        # Add noise to gravity vector measurement.
+        # framequat_data = add_noise(framequat_data, rng, "gaussian", self.noise, curriculum_level) # BUG? noise is added twide? also in ksim rl.py
+
+        # get heading cmd
+        heading_yaw_cmd = state.commands["unified_command"][7]
+
+        # spin back
+        heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
+        backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
+
+        # Get current Kalman filter state
+        x, lag = state.obs_carry
+        x = x * lag + backspun_framequat * (1 - lag)
+
+        return x, (x, lag)
+
+
 @attrs.define(frozen=True)
 class UnifiedCommand(ksim.Command):
     """Unifiying all commands into one to allow for covariance control"""
@@ -537,32 +621,27 @@ class UnifiedCommand(ksim.Command):
               jnp.where(mode == 3, omni_cmd,
               stand_cmd))))
         
-        def get_heading_obs(wz_cmd, physics_data):
-            # init: read og base quat, get rz, that's init heading.
-            # then spin back base quat by euler [0 0 -init_rz], to get it to face 1 0 0 0.
-            # then every timestep, add wz_cmd*dt to heading, and spin back the base quat. 
-            # spun back base quat is obs. goal for model is to keep it at 1 0 0 0.
-
-            # get init heading rz
+        def get_initial_heading(wz_cmd, physics_data):
             init_quat = physics_data.xquat[1]
             init_euler = xax.quat_to_euler(init_quat)
             init_rz = init_euler[2] + self.ctrl_dt * wz_cmd # add 1 step of yaw vel cmd to init rz.
-            init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz]))
+            return jnp.array([init_rz])
+            # init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz]))
 
-            # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
-            # TODO temp heading obs, no noise for now. need solution.
-            heading_obs = physics_data.xquat[1]
+            # # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
+            # # TODO temp heading obs, no noise for now. need solution.
+            # heading_obs = physics_data.xquat[1]
             
-            # Rotate heading_obs by inverse of init_rz_quat to spin it back
-            heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
+            # # Rotate heading_obs by inverse of init_rz_quat to spin it back
+            # heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
             
-            # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
-            # Combine into single vector [4], [1] -- > [5]
-            return jnp.concatenate([heading_obs, jnp.array([init_rz])], axis=0)
+            # # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
+            # # Combine into single vector [4], [1] -- > [5]
+            # return jnp.concatenate([heading_obs, jnp.array([init_rz])], axis=0)
         
-        angvel_cmd = get_heading_obs(cmd[2], physics_data)
-        cmd = jnp.concatenate([cmd[:3], angvel_cmd, cmd[3:]])
-        assert cmd.shape == (11,)
+        heading = get_initial_heading(cmd[2], physics_data)
+        cmd = jnp.concatenate([cmd[:3], heading, cmd[3:]])
+        assert cmd.shape == (7,)
 
         return cmd
 
@@ -571,18 +650,19 @@ class UnifiedCommand(ksim.Command):
     ) -> Array:
         def update_heading_obs(prev_command, physics_data):
             wz_cmd = prev_command[2]
-            yaw_cmd = prev_command[7]  # accumulated yaw, passed by carry for now
+            yaw_cmd = prev_command[3]  # accumulated yaw, passed by carry for now
             
             # Update accumulated yaw by integrating angular velocity
             yaw_cmd = yaw_cmd + wz_cmd * self.ctrl_dt
+            prev_command = prev_command.at[3].set(yaw_cmd)
             
-            # Get current heading observation and rotate it back by yaw_cmd
-            heading_obs = physics_data.xquat[1]  # Base quaternion
-            yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
-            heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
+            # # Get current heading observation and rotate it back by yaw_cmd
+            # heading_obs = physics_data.xquat[1]  # Base quaternion
+            # yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
+            # heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
 
-            prev_command = prev_command.at[3:7].set(heading_obs)
-            prev_command = prev_command.at[7].set(yaw_cmd)
+            # prev_command = prev_command.at[3:7].set(heading_obs)
+            # prev_command = prev_command.at[7].set(yaw_cmd)
             return prev_command
         
         continued_command = update_heading_obs(prev_command, physics_data)
@@ -855,12 +935,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.BaseLinearAccelerationObservation(),
             ksim.BaseAngularAccelerationObservation(),
             ksim.ActuatorAccelerationObservation(),
-            ksim.ProjectedGravityObservation.create(
-                physics_model=physics_model,
-                framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.1),
-                noise=math.radians(1),
-            ),
+            # ksim.ProjectedGravityObservation.create(
+            #     physics_model=physics_model,
+            #     framequat_name="imu_site_quat",
+            #     lag_range=(0.0, 0.1),
+            #     noise=math.radians(1),
+            # ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
@@ -878,6 +958,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 in_robot_frame=True,
             ),
             BaseHeightObservation(),
+            ImuOrientationObservation.create(
+                physics_model=physics_model,
+                framequat_name="imu_site_quat",
+                lag_range=(0.0, 0.1),
+                noise=math.radians(1),
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -943,21 +1029,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_commands = (
             2  # linear velocity command (x, y)
-            + 6  # angular velocity command (cmd, heading_obs[4], carry[1])
+            + 2  # angular velocity command (wz, yaw)
             + 1  # base height command
             + 2  # base xy orientation command
         )
 
         num_actor_inputs = (
             num_joints * 2 # joint pos and vel
-            + 3 # proj_grav
+            + 4 # imu quat
             + num_commands
             + (3 if self.config.use_acc_gyro else 0) # imu_gyro
         )
             
         num_critic_inputs = (
             num_joints * 2 + 3 # joint pos and vel
-            + 3 # proj_grav
+            + 4 # imu quat
             + num_commands
             + 3 # imu gyro
             + 2  # feet touch
@@ -994,14 +1080,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[distrax.Distribution, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        proj_grav_3 = observations["projected_gravity_observation"]
+        # proj_grav_3 = observations["projected_gravity_observation"]
+        imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
-            proj_grav_3,  # 3
+            # proj_grav_3,  # 3
+            imu_quat_4,  # 4
 
             cmd[..., :3],
             jnp.zeros_like(cmd[..., 3:4]),
@@ -1026,7 +1114,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[Array, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        proj_grav_3 = observations["projected_gravity_observation"]
+        # proj_grav_3 = observations["projected_gravity_observation"]
+        imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
@@ -1048,7 +1137,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 # actor obs:
                 joint_pos_n,
                 joint_vel_n / 10.0, # TODO fix this
-                proj_grav_3,
+                imu_quat_4,
 
                 cmd[..., :3],
                 jnp.zeros_like(cmd[..., 3:4]),
