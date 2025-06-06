@@ -174,8 +174,7 @@ def main() -> None:
         initial_heading_quaternion = euler_to_quat(jnp.array([0.0, 0.0, -initial_heading.squeeze()]))
 
         # rotate quaternion by initial heading quaternion
-        base_yaw_quaternion = rotate_quat(quaternion, initial_heading_quaternion)
-
+        # base_yaw_quaternion = rotate_quat(quaternion, initial_heading_quaternion)
         obs = jnp.concatenate(
             [
                 joint_angles,  # NUM_JOINTS (20)
@@ -184,14 +183,14 @@ def main() -> None:
                 cmd_velocity,  # 3 (vx, vy, yaw)
                 cmd_base_height,  # 1 (disabled, zeros)
                 cmd_orientation,  # 2 (rx, ry)
-                base_yaw_quaternion,  # 4 (w, x, y, z)
+                quaternion,  # 4 (w, x, y, z)
                 gyroscope,  # 3
             ],
             axis=-1,
         )
         dist, carry = model.actor.forward(obs, carry)
         return dist.mode(), carry
-
+    
     init_onnx = export_fn(
         model=init_fn,
         metadata=metadata,
