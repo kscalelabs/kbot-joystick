@@ -1,65 +1,47 @@
 <div align="center">
-<h1>K-Bot Joystick Example</h1>
-<p>Train and deploy your own humanoid robot controller in 700 lines of Python by checking out <a href="https://github.com/kscalelabs/ksim-gym">K-Sim Gym</a></p>
+<h1>K-Sim Gym</h1>
+<p>Train and deploy your own humanoid robot controller in 700 lines of Python</p>
+<h3>
+  <a href="https://url.kscale.dev/leaderboard">Leaderboard</a> ·
+  <a href="https://url.kscale.dev/docs">Documentation</a> ·
+  <a href="https://github.com/kscalelabs/ksim/tree/master/examples">K-Sim Examples</a>
+</h3>
 
-<img src="https://github.com/kscalelabs/kbot-joystick/raw/master/assets/forward.gif" alt="K-Bot Joystick Demo" width="250">
-
-<img src="https://github.com/kscalelabs/kbot-joystick/raw/master/assets/turn.gif" alt="K-Bot Joystick Demo" width="250">
+https://github.com/user-attachments/assets/3d44aa23-5ad7-41a3-b467-22165542b8c4
 
 </div>
 
-## Overview
-This repository contains an example of a joystick controller for the K-Bot humanoid robot that is actively under development. It currently takes significantly longer than the K-Sim Gym example to train (~3000 steps vs ~150 steps).
-
-If you think you can bring that time down though, have a crack at it!
-
-The main differences between this example and the K-Sim Gym benchmark are:
-1. Joystick commands as a one-hot encoded vector with 7 dimensions:
-    - 0: Stand still
-    - 1: Move forward
-    - 2: Move backward
-    - 3: Move left
-    - 4: Move right
-    - 5: Turn left
-    - 6: Turn right
-2. A lot more randomization in observations and actions
-3. Phase-based feet height tracking reward to encourage a more natural gait
-
-You can also try out the pre-trained and converted model in `assets/joystick.kinfer` by:
-1. Cloning the repository
-2. Installing `kinfer-sim` with `pip install kinfer-sim`
-3. Running the following command:
-```bash
-kinfer-sim assets/joystick.kinfer kbot --use-keyboard
-```
-4. Focus on the terminal window that's running `kinfer-sim` and use `W`, `A`, `S`, `D`, `Q`, `E` to move the robot around.
-
-https://github.com/user-attachments/assets/422b7d58-1cc0-4ac6-b8ea-4d63f3c21fce
-
 ## Getting Started
+
+You can use this repository as a GitHub template or as a Google Colab.
+
+### Google Colab
+
+You can quickly try out the humanoid benchmark by running the [training notebook](https://colab.research.google.com/github/kscalelabs/ksim-gym/blob/master/train.ipynb) in Google Colab.
 
 ### On your own GPU
 
 1. Read through the [current leaderboard](https://url.kscale.dev/leaderboard) submissions and through the [ksim examples](https://github.com/kscalelabs/ksim/tree/master/examples)
-2. Make sure you have installed `git-lfs`:
+2. Create a new repository from this template by clicking [here](https://github.com/new?template_name=ksim-gym&template_owner=kscalelabs)
+3. Make sure you have installed `git-lfs`:
 
 ```bash
 sudo apt install git-lfs  # Ubuntu
 brew install git-lfs  # MacOS
 ```
 
-4. Clone this repository:
+4. Clone the new repository you create from this template:
 
 ```bash
-git clone git@github.com:kscalelabs/kbot-joystick.git
-cd kbot-joystick
+git clone git@github.com:<YOUR USERNAME>/ksim-gym.git
+cd ksim-gym
 ```
 
 5. Create a new Python environment (we require Python 3.11 or later)
 6. Install the package with its dependencies:
 
 ```bash
-pip install -e .
+pip install -r requirements.txt
 pip install 'jax[cuda12]'  # If using GPU machine, install Jax CUDA libraries
 ```
 
@@ -78,7 +60,7 @@ python -m convert /path/to/ckpt.bin /path/to/model.kinfer
 9. Visualize the converted model:
 
 ```bash
-kinfer-sim assets/joystick.kinfer kbot --save-video assets/video.mp4
+kinfer-sim assets/model.kinfer kbot --save-video assets/video.mp4
 ```
 
 10. Commit the K-Infer model and the recorded video to this repository
@@ -117,3 +99,9 @@ You can visualize the pre-trained model by combining these two commands:
 python -m train load_from_ckpt_path=assets/ckpt.bin run_mode=view
 ```
 
+If you want to use the Jupyter notebook and don't want to commit your training logs, we suggest using [pre-commit](https://pre-commit.com/) to clean the notebook before committing:
+
+```bash
+pip install pre-commit
+pre-commit install
+```
