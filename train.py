@@ -570,7 +570,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         x, lag = state.obs_carry
         # x = x * lag + backspun_framequat * (1 - lag) # BUG TODO TESTING 
 
-        return x, (x, lag)
+        return backspun_framequat, (x, lag)
 
 
 @attrs.define(frozen=True)
