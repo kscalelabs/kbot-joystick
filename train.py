@@ -340,7 +340,7 @@ class AngularVelocityTrackingReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        base_yaw_cmd = trajectory.command[self.command_name][:, 7]
+        base_yaw_cmd = trajectory.command[self.command_name][:, 3]
 
         base_yaw_quat = xax.euler_to_quat(jnp.stack([
             jnp.zeros_like(base_yaw_cmd),
@@ -570,7 +570,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         x, lag = state.obs_carry
         x = x * lag + backspun_framequat * (1 - lag)
 
-        return backspun_framequat, (x, lag)
+        return x, (x, lag)
 
 
 @attrs.define(frozen=True)
