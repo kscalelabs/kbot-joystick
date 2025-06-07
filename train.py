@@ -568,7 +568,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
 
         # Get current Kalman filter state
         x, lag = state.obs_carry
-        x = x * lag + backspun_framequat * (1 - lag)
+        # x = x * lag + backspun_framequat * (1 - lag) # BUG TODO TESTING 
 
         return x, (x, lag)
 
