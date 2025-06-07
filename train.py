@@ -1042,7 +1042,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
             
         num_critic_inputs = (
-            num_joints * 2 + 3 # joint pos and vel
+            num_joints * 2 # joint pos and vel
             + 4 # imu quat
             + num_commands
             + 3 # imu gyro
