@@ -371,9 +371,9 @@ class XYOrientationReward(ksim.Reward):
         base_xy_quat = xax.euler_to_quat(euler_orientation)
 
         commanded_euler = jnp.stack([
-            trajectory.command[self.command_name][:, 9],
-            trajectory.command[self.command_name][:, 10],
-            jnp.zeros_like(trajectory.command[self.command_name][:, 10])
+            trajectory.command[self.command_name][:, 5],
+            trajectory.command[self.command_name][:, 6],
+            jnp.zeros_like(trajectory.command[self.command_name][:, 6])
         ], axis=-1)
         base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
 
@@ -390,7 +390,7 @@ class BaseHeightReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_height = trajectory.xpos[:, 1, 2] # 1st body, because world is 0. 2nd element is z.
-        commanded_height = trajectory.command["unified_command"][:, 8] + self.standard_height
+        commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
         
         height_error = jnp.abs(current_height - commanded_height)
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
