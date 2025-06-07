@@ -523,7 +523,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         lag_range: tuple[float, float] = (0.01, 0.1),
         noise: float = 0.0,
     ) -> Self:
-        """Create a projected gravity observation from a physics model.
+        """Create a IMU orientation observation from a physics model.
 
         Args:
             physics_model: MuJoCo physics model
@@ -556,7 +556,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         framequat_start, framequat_end = self.framequat_idx_range
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
-        # Add noise to gravity vector measurement.
+        # Add noise
         # framequat_data = add_noise(framequat_data, rng, "gaussian", self.noise, curriculum_level) # BUG? noise is added twide? also in ksim rl.py
 
         # get heading cmd
@@ -613,34 +613,18 @@ class UnifiedCommand(ksim.Command):
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
         stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
         
+        # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=5)
-        # Use JAX's where to select the appropriate command
         cmd = jnp.where(mode == 0, forward_cmd,
               jnp.where(mode == 1, sideways_cmd,
               jnp.where(mode == 2, rotate_cmd,
               jnp.where(mode == 3, omni_cmd,
               stand_cmd))))
-        
-        def get_initial_heading(wz_cmd, physics_data):
-            init_quat = physics_data.xquat[1]
-            init_euler = xax.quat_to_euler(init_quat)
-            init_rz = init_euler[2] + self.ctrl_dt * wz_cmd # add 1 step of yaw vel cmd to init rz.
-            return jnp.array([init_rz])
-            # init_rz_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, init_rz]))
 
-            # # get heading obs, spin back by init_rz, to get it to face 1 0 0 0.
-            # # TODO temp heading obs, no noise for now. need solution.
-            # heading_obs = physics_data.xquat[1]
-            
-            # # Rotate heading_obs by inverse of init_rz_quat to spin it back
-            # heading_obs = rotate_quat_by_quat(heading_obs, init_rz_quat, inverse=True)
-            
-            # # return yaw velocity cmd, heading_obs, for heading carry: rz # TODO temp HACK, dont want rz in obs but need for carry. 
-            # # Combine into single vector [4], [1] -- > [5]
-            # return jnp.concatenate([heading_obs, jnp.array([init_rz])], axis=0)
-        
-        heading = get_initial_heading(cmd[2], physics_data)
-        cmd = jnp.concatenate([cmd[:3], heading, cmd[3:]])
+        # get initial heading
+        init_euler = xax.quat_to_euler(physics_data.xquat[1])
+        init_heading = init_euler[2] + self.ctrl_dt * cmd[2] # add 1 step of yaw vel cmd to initial heading.
+        cmd = jnp.concatenate([cmd[:3], jnp.array([init_heading]), cmd[3:]])
         assert cmd.shape == (7,)
 
         return cmd
@@ -648,24 +632,14 @@ class UnifiedCommand(ksim.Command):
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
-        def update_heading_obs(prev_command, physics_data):
-            wz_cmd = prev_command[2]
-            yaw_cmd = prev_command[3]  # accumulated yaw, passed by carry for now
-            
-            # Update accumulated yaw by integrating angular velocity
-            yaw_cmd = yaw_cmd + wz_cmd * self.ctrl_dt
-            prev_command = prev_command.at[3].set(yaw_cmd)
-            
-            # # Get current heading observation and rotate it back by yaw_cmd
-            # heading_obs = physics_data.xquat[1]  # Base quaternion
-            # yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, yaw_cmd]))
-            # heading_obs = rotate_quat_by_quat(heading_obs, yaw_cmd_quat, inverse=True)
-
-            # prev_command = prev_command.at[3:7].set(heading_obs)
-            # prev_command = prev_command.at[7].set(yaw_cmd)
+        def update_heading(prev_command):
+            """Update the heading by integrating the angular velocity."""
+            wz_cmd, heading = prev_command[2], prev_command[3]
+            heading = heading + wz_cmd * self.ctrl_dt
+            prev_command = prev_command.at[3].set(heading)
             return prev_command
         
-        continued_command = update_heading_obs(prev_command, physics_data)
+        continued_command = update_heading(prev_command)
 
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
@@ -935,12 +909,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.BaseLinearAccelerationObservation(),
             ksim.BaseAngularAccelerationObservation(),
             ksim.ActuatorAccelerationObservation(),
-            # ksim.ProjectedGravityObservation.create(
-            #     physics_model=physics_model,
-            #     framequat_name="imu_site_quat",
-            #     lag_range=(0.0, 0.1),
-            #     noise=math.radians(1),
-            # ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
@@ -1080,7 +1048,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[distrax.Distribution, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        # proj_grav_3 = observations["projected_gravity_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
@@ -1088,7 +1055,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
-            # proj_grav_3,  # 3
             imu_quat_4,  # 4
 
             cmd[..., :3],
@@ -1114,7 +1080,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[Array, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        # proj_grav_3 = observations["projected_gravity_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
