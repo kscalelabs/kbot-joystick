@@ -14,7 +14,7 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 11
+NUM_COMMANDS_MODEL = 7
 
 
 def make_export_model(model: Model) -> Callable:
@@ -63,9 +63,10 @@ def main() -> None:
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        projected_gravity: Array,
+        quaternion: Array, # umu quat
+        # projected_gravity: Array,
         command: Array,
-        accelerometer: Array,
+        # accelerometer: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
@@ -73,9 +74,8 @@ def main() -> None:
             [
                 joint_angles,
                 joint_angular_velocities,
-                projected_gravity,
+                quaternion,
                 command,
-                # accelerometer,
                 gyroscope,
             ],
             axis=-1,
