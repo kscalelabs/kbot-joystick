@@ -2,7 +2,6 @@
 
 import argparse
 from pathlib import Path
-from typing import Callable
 
 import jax
 import jax.numpy as jnp
@@ -14,7 +13,7 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 6  # Updated to match unified command structure
+NUM_COMMANDS_MODEL = 6
 
 
 def euler_to_quat(euler_3: Array) -> Array:
@@ -75,6 +74,21 @@ def rotate_quat(q1: Array, q2: Array) -> Array:
     )
 
 
+def rotate_quat_inverse(q1: Array, q2: Array) -> Array:
+    """Rotate quaternion q1 by quaternion q2.
+
+    Args:
+        q1: quaternion to be rotated [w, x, y, z]
+        q2: quaternion to rotate by [w, x, y, z]
+
+    Returns:
+        rotated quaternion [w, x, y, z]
+    """
+    q2_conj = jnp.array([q2[0], -q2[1], -q2[2], -q2[3]])
+
+    return rotate_quat(q1, q2_conj)
+
+
 def quat_to_euler(quat_4: Array, eps: float = 1e-6) -> Array:
     """Normalizes and converts a quaternion (w, x, y, z) to roll, pitch, yaw.
 
@@ -109,17 +123,6 @@ def quat_to_euler(quat_4: Array, eps: float = 1e-6) -> Array:
     yaw = jnp.arctan2(siny_cosp, cosy_cosp)
 
     return jnp.concatenate([roll, pitch, yaw], axis=-1)
-
-
-def make_export_model(model: Model) -> Callable:
-    def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        dist, carry = model.actor.forward(obs, carry)
-        return dist.mode(), carry
-
-    def batched_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        return jax.vmap(model_fn)(obs, carry)
-
-    return batched_model_fn
 
 
 def main() -> None:
@@ -157,40 +160,35 @@ def main() -> None:
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        projected_gravity: Array,
-        command: Array,
         quaternion: Array,
         initial_heading: Array,
+        command: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        # Match the exact observation structure from training run_actor method
-        # cmd format: [vx, vy, yaw, base_height, rx, ry]
-        cmd_velocity = command[:3]  # vx, vy, yaw
-        cmd_base_height = jnp.zeros_like(command[3:4])  # disabled base height (set to 0)
-        cmd_orientation = command[4:]  # rx, ry
+        heading_yaw_cmd = command[2]  # yaw_heading is at index 2
 
-        # convert initial heading to quaternion
-        initial_heading_quaternion = euler_to_quat(jnp.array([0.0, 0.0, -initial_heading.squeeze()]))
+        initial_heading_quat = euler_to_quat(jnp.array([0.0, 0.0, initial_heading.squeeze()]))
 
-        # rotate quaternion by initial heading quaternion
-        # base_yaw_quaternion = rotate_quat(quaternion, initial_heading_quaternion)
-        obs = jnp.concatenate(
-            [
-                joint_angles,  # NUM_JOINTS (20)
-                joint_angular_velocities,  # NUM_JOINTS (20)
-                projected_gravity,  # 3
-                cmd_velocity,  # 3 (vx, vy, yaw)
-                cmd_base_height,  # 1 (disabled, zeros)
-                cmd_orientation,  # 2 (rx, ry)
-                quaternion,  # 4 (w, x, y, z)
-                gyroscope,  # 3
-            ],
-            axis=-1,
-        )
-        dist, carry = model.actor.forward(obs, carry)
+        base_yaw_quat = rotate_quat_inverse(initial_heading_quat, quaternion)
+
+        # Create quaternion from heading command
+        heading_yaw_cmd_quat = euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
+
+        backspun_imu_quat = rotate_quat_inverse(base_yaw_quat, heading_yaw_cmd_quat)
+
+        obs = [
+            joint_angles,  # NUM_JOINTS (20)
+            joint_angular_velocities,  # NUM_JOINTS (20)
+            backspun_imu_quat,  # 4 (backspun IMU quaternion)
+            command,  # 6: [vx, vy, yaw_heading, bh, rx, ry]
+            gyroscope,  # 3 (IMU gyroscope data)
+        ]
+
+        obs_n = jnp.concatenate(obs, axis=-1)
+        dist, carry = model.actor.forward(obs_n, carry)
         return dist.mode(), carry
-    
+
     init_onnx = export_fn(
         model=init_fn,
         metadata=metadata,
