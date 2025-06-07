@@ -557,10 +557,10 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
         # Add noise
-        # framequat_data = add_noise(framequat_data, rng, "gaussian", self.noise, curriculum_level) # BUG? noise is added twide? also in ksim rl.py
+        # framequat_data = add_noise(framequat_data, rng, "gaussian", self.noise, curriculum_level) # BUG? noise is added twice? also in ksim rl.py
 
         # get heading cmd
-        heading_yaw_cmd = state.commands["unified_command"][7]
+        heading_yaw_cmd = state.commands["unified_command"][3]
 
         # spin back
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
@@ -568,7 +568,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
 
         # Get current Kalman filter state
         x, lag = state.obs_carry
-        # x = x * lag + backspun_framequat * (1 - lag) # BUG TODO TESTING 
+        x = x * lag + backspun_framequat * (1 - lag)
 
         return backspun_framequat, (x, lag)
 
