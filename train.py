@@ -1111,7 +1111,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_commands = (
             2  # linear velocity command (vx, vy)
-            + 2  # angular velocity command (wz, yaw)
+            + 1 # angular velocity command (yaw)
             + 1  # base height command
             + 2  # base xy orientation command (rx, ry)
         )
@@ -1126,7 +1126,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
             + 4  # imu quat
-            + num_commands
+            + num_commands + 1 # include yaw rate
             + 3  # imu gyro
             + 2  # feet touch
             + 6  # feet position
@@ -1166,13 +1166,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
+        vel_cmd = cmd[..., :2] # skip index 2 (yaw rate)
+        yaw_cmd = cmd[..., 3:4]
+        bh_cmd = cmd[..., 4:5]
+        base_xy_cmd = cmd[..., 5:]
+
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
-            cmd[..., :3],
-            jnp.zeros_like(cmd[..., 3:4]),
-            cmd[..., 4:],
+            vel_cmd, # exclude yaw rate
+            yaw_cmd, # absolute yaw
+            jnp.zeros_like(bh_cmd),
+            base_xy_cmd,
         ]
         if self.config.use_acc_gyro:
             obs += [

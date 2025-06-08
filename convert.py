@@ -8,24 +8,14 @@ import jax
 import jax.numpy as jnp
 import ksim
 from jaxtyping import Array
+import xax
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
 
-from train import HumanoidWalkingTask, Model
+from train import HumanoidWalkingTask, Model, rotate_quat_by_quat
 
-NUM_COMMANDS_MODEL = 7
-
-
-def make_export_model(model: Model) -> Callable:
-    def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        dist, carry = model.actor.forward(obs, carry)
-        return dist.mode(), carry
-
-    def batched_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        return jax.vmap(model_fn)(obs, carry)
-
-    return batched_model_fn
+NUM_COMMANDS_MODEL = 6
 
 
 def main() -> None:
@@ -68,11 +58,16 @@ def main() -> None:
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        
+        heading_yaw_cmd = command[..., 2]
+        heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
+        backspun_framequat = rotate_quat_by_quat(quaternion, heading_yaw_cmd_quat, inverse=True)
+
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
-                quaternion,
+                backspun_framequat,
                 command,
                 gyroscope,
             ],
