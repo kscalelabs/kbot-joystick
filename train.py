@@ -70,6 +70,29 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
+
+    # Curriculum parameters.
+    num_curriculum_levels: int = xax.field(
+        value=30,
+        help="The number of curriculum levels to use.",
+    )
+    increase_threshold: float = xax.field(
+        value=30.0,
+        help="Increase the curriculum level when the mean trajectory length is above this threshold.",
+    )
+    decrease_threshold: float = xax.field(
+        value=10.0,
+        help="Decrease the curriculum level when the mean trajectory length is below this threshold.",
+    )
+    min_level_steps: int = xax.field(
+        value=10,
+        help="The minimum number of steps to wait before changing the curriculum level.",
+    )
+    min_level: float = xax.field(
+        value=0.01,
+        help="The minimum curriculum level.",
+    )
+
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=3e-4,
@@ -318,7 +341,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
         # rotate local frame commands to global frame
         robot_vel_cmd = jnp.zeros_like(global_vel).at[:, :2].set(trajectory.command[self.command_name][:, :2])
-        global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
+        global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=True)
 
         # drop vz. vz conflicts with base height reward.
         global_vel_xy_cmd = global_vel_cmd[:, :2]
@@ -327,7 +350,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         # now compute error. special trick: different kernels for standing and walking.
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
-        error = jnp.where(zero_cmd_mask, vel_error, 2 * jnp.square(vel_error))
+        error = jnp.where(zero_cmd_mask, xax.get_norm(global_vel_xy, self.norm).mean(axis=-1), 2 * jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
 
 
@@ -420,6 +443,24 @@ class FeetPositionReward(ksim.Reward):
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
 
+@attrs.define(frozen=True, kw_only=True)
+class FeetSlipPenalty(ksim.Reward):
+    """Penalises COM motion while feet are on the ground."""
+
+    com_vel_obs_name: str = "center_of_mass_velocity_observation"
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        vel_xy = traj.obs[self.com_vel_obs_name][..., :2] # (T, 2)
+        speed  = jnp.linalg.norm(vel_xy, axis=-1, keepdims=True) # (T, 1)
+
+        left_contact  = (traj.obs["sensor_observation_left_foot_touch"]  > 0.1).squeeze(-1)
+        right_contact = (traj.obs["sensor_observation_right_foot_touch"] > 0.1).squeeze(-1)
+
+        # (T, 2) float mask
+        contact_mask = jnp.stack([left_contact, right_contact], axis=-1).astype(jnp.float32)
+
+        # broadcasts from (T,1) → (T,2); sum over feet → (T,)
+        return jnp.sum(speed * contact_mask, axis=-1)
 
 @attrs.define(frozen=True)
 class FeetOrientationReward(ksim.Reward):
@@ -697,10 +738,10 @@ class UnifiedCommand(ksim.Command):
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
-        # don't like super small velocity commands
-        vx = jnp.where(jnp.abs(vx) < 0.09, 0.0, vx)
-        vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
-        wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
+        # # don't like super small velocity commands
+        # vx = jnp.where(jnp.abs(vx) < 0.09, 0.0, vx)
+        # vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
+        # wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
 
         _ = jnp.zeros_like(vx)
 
@@ -955,7 +996,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        model = mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        names_to_idxs = ksim.get_geom_data_idx_by_name(model)
+        model.geom_priority[names_to_idxs["floor"]] = 2.0
+        return model
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
@@ -979,33 +1023,34 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
         return [
             ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
+            ksim.ArmatureRandomizer(scale_lower=0.1, scale_upper=10.0),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.15),
+            ksim.JointDampingRandomizer(scale_lower=0.1, scale_upper=10.0),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.1, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.3, scale_upper=1.5
             ),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_linvel=0.5,
-                y_linvel=0.5,
-                z_linvel=0.3,
-                vel_range=(0.2, 0.8),
-                x_angvel=0.0,  # 0.4
-                y_angvel=0.0,
-                z_angvel=0.0,
-                interval_range=(4.0, 6.0),
+                x_linvel=0.7,
+                y_linvel=0.7,
+                z_linvel=0.7,
+                vel_range=(0.5, 1.4),
+                x_angvel=0.7,
+                y_angvel=0.7,
+                z_angvel=0.7,
+                interval_range=(2.0, 4.0),
             ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=0.1),
+            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=math.radians(45)),
             ksim.RandomJointVelocityReset(),
+            ksim.RandomHeightReset(range=(0.0, 0.3)),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
@@ -1067,16 +1112,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # cmd
-            LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
-            AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
+            LinearVelocityTrackingReward(scale=0.4, error_scale=0.1),
+            AngularVelocityTrackingReward(scale=0.2, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=1.0),
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=2.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
+            FeetAirtimeReward(scale=2.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.6, scale_by_curriculum=False),
+            FeetSlipPenalty(scale=-0.1),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.02),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.1),
+            
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.CtrlPenalty(scale=-0.00001),
@@ -1100,10 +1147,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
-        return ksim.LinearCurriculum(
-            step_size=1,
-            step_every_n_epochs=1,
-            min_level=0.4,
+        return ksim.EpisodeLengthCurriculum(
+            num_levels=self.config.num_curriculum_levels,
+            increase_threshold=self.config.increase_threshold,
+            decrease_threshold=self.config.decrease_threshold,
+            min_level_steps=self.config.min_level_steps,
+            min_level=self.config.min_level,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
