@@ -563,6 +563,8 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         # spin back
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
         backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
+        # ensure positive quathemisphere
+        backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
 
         # Get current Kalman filter state
         x, lag = state.obs_carry
