@@ -713,13 +713,11 @@ class UnifiedCommand(ksim.Command):
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=5)
-        cmd = jnp.where(
-            mode == 0,
-            forward_cmd,
-            jnp.where(
-                mode == 1, sideways_cmd, jnp.where(mode == 2, rotate_cmd, jnp.where(mode == 3, omni_cmd, stand_cmd))
-            ),
-        )
+        cmd = jnp.where(mode == 0, forward_cmd,
+              jnp.where(mode == 1, sideways_cmd,
+              jnp.where(mode == 2, rotate_cmd,
+              jnp.where(mode == 3, omni_cmd,
+              stand_cmd))))
 
         # get initial heading
         init_euler = xax.quat_to_euler(physics_data.xquat[1])
