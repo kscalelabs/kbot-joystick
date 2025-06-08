@@ -17,17 +17,6 @@ from train import HumanoidWalkingTask, Model
 NUM_COMMANDS_MODEL = 7
 
 
-def make_export_model(model: Model) -> Callable:
-    def model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        dist, carry = model.actor.forward(obs, carry)
-        return dist.mode(), carry
-
-    def batched_model_fn(obs: Array, carry: Array) -> tuple[Array, Array]:
-        return jax.vmap(model_fn)(obs, carry)
-
-    return batched_model_fn
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint_path", type=str)
