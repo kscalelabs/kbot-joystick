@@ -1074,7 +1074,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            FeetAirtimeReward(scale=2.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4, scale_by_curriculum=True),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.02),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
@@ -1096,14 +1096,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
-            ksim.EpisodeLengthTermination(max_length_sec=24),
+            # ksim.EpisodeLengthTermination(max_length_sec=24),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.LinearCurriculum(
             step_size=1,
             step_every_n_epochs=1,
-            min_level=1.0,  # disable curriculum
+            min_level=0.4,
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
