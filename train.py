@@ -714,12 +714,14 @@ class UnifiedCommand(ksim.Command):
         stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
 
         # randomly select a mode
-        mode = jax.random.randint(rng_a, (), minval=0, maxval=6) # 0 1 2 3 4s 5s -- 2/6 standing
-        cmd = jnp.where(mode == 0, forward_cmd,
-              jnp.where(mode == 1, sideways_cmd,
-              jnp.where(mode == 2, rotate_cmd,
-              jnp.where(mode == 3, omni_cmd,
-              stand_cmd))))
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
+        cmd = jnp.where(
+            mode == 0,
+            forward_cmd,
+            jnp.where(
+                mode == 1, sideways_cmd, jnp.where(mode == 2, rotate_cmd, jnp.where(mode == 3, omni_cmd, stand_cmd))
+            ),
+        )
 
         # get initial heading
         init_euler = xax.quat_to_euler(physics_data.xquat[1])
@@ -1055,7 +1057,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 wz_range=(-0.5, 0.5),  # rad/s
                 # bh_range=(-0.05, 0.05), # m
                 bh_range=(0.0, 0.0),  # m # disabled for now, does not work on this robot. reward conflicts
-                bh_standing_range=(-0.2, 0.0), # m
+                bh_standing_range=(-0.2, 0.0),  # m
                 # bh_standing_range=(0.0, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
