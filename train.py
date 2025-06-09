@@ -613,8 +613,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            # action_noise=math.radians(5),
-            # action_noise_type="gaussian",
+            action_noise=math.radians(5),
+            action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -672,8 +672,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.01),
-                noise=0.01,
+                lag_range=(0.0, 0.1),
+                noise=0.1,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
