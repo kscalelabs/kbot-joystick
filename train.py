@@ -613,8 +613,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            action_noise=math.radians(5),
-            action_noise_type="gaussian",
+            # action_noise=math.radians(5),
+            # action_noise_type="gaussian",
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
@@ -657,8 +657,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             TimestepPhaseObservation(),
-            ksim.JointPositionObservation(noise=math.radians(3)),
-            ksim.JointVelocityObservation(noise=math.radians(90)),
+            ksim.JointPositionObservation(noise=math.radians(2)),
+            ksim.JointVelocityObservation(noise=math.radians(30)),
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -673,7 +673,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.01),
-                noise=0.1,
+                noise=0.01,
             ),
             ksim.SensorObservation.create(
                 physics_model=physics_model,
@@ -683,7 +683,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(20),
+                noise=math.radians(15),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
@@ -738,7 +738,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # Normalisation penalties.
             ksim.AvoidLimitsPenalty.create(physics_model, scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.02, scale_by_curriculum=True),
-            ksim.JointVelocityPenalty(scale=-0.04, scale_by_curriculum=True),
+            ksim.JointVelocityPenalty(scale=-0.06, scale_by_curriculum=True),
             ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.LinkAccelerationPenalty(scale=-0.02, scale_by_curriculum=True),
             ksim.ActionAccelerationPenalty(scale=-1 * self.config.action_acc, scale_by_curriculum=True),
@@ -746,7 +746,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.LinkJerkPenalty(scale=-0.02, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"), scale=-4.5, scale_by_curriculum=True),
             ksim.LinearVelocityPenalty(index=("z",), scale=-0.5, scale_by_curriculum=True),
-            ksim.CtrlPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.CtrlPenalty(scale=-0.02, scale_by_curriculum=True),
             # Bespoke rewards.
             BentArmPenalty.create_penalty(physics_model, scale=-0.5),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.2),
