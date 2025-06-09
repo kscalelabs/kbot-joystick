@@ -392,8 +392,8 @@ class BaseHeightReward(ksim.Reward):
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
 
         height_error = jnp.abs(current_height - commanded_height)
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        height_error = jnp.where(is_zero_cmd, height_error, height_error**2)  # smooth kernel for walking.
+        # is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        # height_error = jnp.where(is_zero_cmd, height_error, height_error**2)  # smooth kernel for walking.
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -563,7 +563,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         # spin back
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
         backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
-        # ensure positive quathemisphere
+        # ensure positive quat hemisphere
         backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
 
         # Get current Kalman filter state
@@ -1070,7 +1070,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=1.0),
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
