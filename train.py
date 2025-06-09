@@ -203,63 +203,66 @@ class SingleFootContactReward(ksim.StatefulReward):
         reward = jnp.where(is_zero_cmd, 0.0, single_contact_grace.squeeze())
         return reward, carry
 
-
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.StatefulReward):
-    """Encourages reasonable step frequency by rewarding long swing phases and penalizing quick stepping."""
+    """Encourages the robot to swing its legs.
 
-    scale: float = 1.0
+    Each foot accumulates airtime (clamped at ``max_airtime_seconds``) while it
+    is off the ground. On touchdown the accumulated airtime is rewarded, then
+    a fixed penalty is subtracted.  When the robot is standing still the reward
+    is set to zero.
+    """
+
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
-    scale_by_curriculum: bool = False
+    stand_still_threshold: float = 0.01
+    max_airtime_seconds: float = 0.5
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
-        # initial left and right airtime
         return jnp.array([0.0, 0.0])
 
-    def _airtime_sequence(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
-        """Returns an array with the airtime (in seconds) for each timestep."""
+    def _scan_step(self, airtime: Array, is_contact: Array) -> tuple[Array, Array]:
+        """Updates the airtime counter for a single time–step."""
+        out = jnp.where(is_contact, airtime, airtime + self.ctrl_dt)
+        new_airtime = jnp.where(is_contact, 0.0, out)
+        return new_airtime, out
 
-        def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
-            new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
-            return new_time, new_time
+    def _airtime_sequence(self, initial_airtime: Array, contact: Array) -> tuple[Array, Array]:
+        final_airtime, airtime = jax.lax.scan(self._scan_step, initial_airtime, contact)
+        return final_airtime, airtime
 
-        # or with done to reset the airtime counter when the episode is done
-        contact_or_done = jnp.logical_or(contact_bool, done)
-        carry, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
-        return carry, airtime
+    @staticmethod
+    def _touchdown_flag(contact: Array) -> Array:
+        prev = jnp.concatenate([jnp.zeros(1, dtype=bool), contact[:-1]])
+        return jnp.logical_and(contact, jnp.logical_not(prev))  # 0 → 1 edge
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        left_in  = (traj.obs["sensor_observation_left_foot_touch"] > 0.1).squeeze()
+        right_in = (traj.obs["sensor_observation_right_foot_touch"] > 0.1).squeeze()
 
-        # airtime counters
-        left_carry, left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
-        right_carry, right_air = self._airtime_sequence(reward_carry[1], right_contact, traj.done)
+        # airtime accumulation
+        left_carry,  left_air  = self._airtime_sequence(reward_carry[0], left_in)
+        right_carry, right_air = self._airtime_sequence(reward_carry[1], right_in)
 
-        reward_carry = jnp.array([left_carry, right_carry])
+        left_air = jnp.minimum(left_air,  self.max_airtime_seconds)
+        right_air = jnp.minimum(right_air, self.max_airtime_seconds)
 
-        # touchdown boolean (0→1 transition)
-        def touchdown(c: Array) -> Array:
-            prev = jnp.concatenate([jnp.array([False]), c[:-1]])
-            return jnp.logical_and(c, jnp.logical_not(prev))
+        # touchdown detection
+        td_l = self._touchdown_flag(left_in)
+        td_r = self._touchdown_flag(right_in)
 
-        td_l = touchdown(left_contact)
-        td_r = touchdown(right_contact)
+        # reward terms
+        swing_bonus = (~left_in).astype(jnp.float32)  * left_air + (~right_in).astype(jnp.float32) * right_air
+        penalty = (td_l.astype(jnp.float32) + td_r.astype(jnp.float32)) * self.touchdown_penalty
+        swing_reward = swing_bonus - penalty
 
-        left_air_shifted = jnp.roll(left_air, 1)
-        right_air_shifted = jnp.roll(right_air, 1)
+        lin_speed = jnp.linalg.norm(traj.command["unified_command"][..., :2], axis=-1)
+        ang_speed = jnp.abs(traj.command["unified_command"][..., 2])
 
-        left_feet_airtime_reward = (left_air_shifted - self.touchdown_penalty) * td_l.astype(jnp.float32)
-        right_feet_airtime_reward = (right_air_shifted - self.touchdown_penalty) * td_r.astype(jnp.float32)
+        stand = (lin_speed < self.stand_still_threshold) & (ang_speed < self.stand_still_threshold)
+        reward = jnp.where(stand, 0.0, swing_reward)
 
-        reward = left_feet_airtime_reward + right_feet_airtime_reward
-
-        # standing mask
-        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 0.0, reward)
-
-        return reward, reward_carry
+        return reward, jnp.array([left_carry, right_carry])
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -605,6 +608,9 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
         backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
 
+        # ensure heading is in consistent hemisphere
+        backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
+
         # Get current Kalman filter state
         x, lag = state.obs_carry
         x = x * lag + backspun_framequat * (1 - lag)
@@ -753,7 +759,7 @@ class UnifiedCommand(ksim.Command):
         stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
 
         # randomly select a mode
-        mode = jax.random.randint(rng_a, (), minval=0, maxval=5)
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=7)
         cmd = jnp.where(
             mode == 0,
             forward_cmd,
@@ -1074,6 +1080,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_touch", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_touch", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_linvel", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_angvel", noise=0.0),
             FeetPositionObservation.create(
@@ -1119,24 +1127,24 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=2.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.6, scale_by_curriculum=False),
+            FeetAirtimeReward(scale=2.0, ctrl_dt=self.config.ctrl_dt, max_airtime_seconds=0.25, touchdown_penalty=0.4, scale_by_curriculum=False),
             FeetSlipPenalty(scale=-0.1),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.1),
             
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            # ksim.CtrlPenalty(scale=-0.00001),
+            ksim.CtrlPenalty(scale=-0.001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # BUG: wrong sensors
-            # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-            #     scale=-0.03,
-            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            # ),
+            ContactForcePenalty(
+                scale=-0.03,
+                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
