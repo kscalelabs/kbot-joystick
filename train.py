@@ -177,7 +177,7 @@ class SingleFootContactReward(ksim.StatefulReward):
         carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, single)
         single_contact_grace = time_since_single_contact < self.grace_period
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 0.0, single_contact_grace.squeeze())
+        reward = jnp.where(is_zero_cmd, 1.0, single_contact_grace.squeeze())
         return reward, carry
 
 
@@ -715,12 +715,16 @@ class UnifiedCommand(ksim.Command):
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
-        cmd = jnp.where(
-            mode == 0,
-            forward_cmd,
-            jnp.where(
-                mode == 1, sideways_cmd, jnp.where(mode == 2, rotate_cmd, jnp.where(mode == 3, omni_cmd, stand_cmd))
-            ),
+        cmd = jnp.select(
+            mode,
+            [
+                forward_cmd,
+                sideways_cmd,
+                rotate_cmd,
+                omni_cmd,
+                stand_cmd,
+                stand_cmd,
+            ],
         )
 
         # get initial heading
