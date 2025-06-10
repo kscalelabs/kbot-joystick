@@ -754,15 +754,15 @@ class UnifiedCommand(ksim.Command):
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
-        cmd = jnp.select(
+        cmd = jax.lax.switch(
             mode,
             [
-                forward_cmd,
-                sideways_cmd,
-                rotate_cmd,
-                omni_cmd,
-                stand_cmd,
-                stand_cmd,
+                lambda: forward_cmd,
+                lambda: sideways_cmd,
+                lambda: rotate_cmd,
+                lambda: omni_cmd,
+                lambda: stand_cmd,
+                lambda: stand_cmd,
             ],
         )
 
