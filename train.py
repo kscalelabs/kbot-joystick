@@ -265,35 +265,6 @@ class JointPositionPenalty(ksim.JointDeviationPenalty):
         )
 
 
-# TODO implement this as a reward with kernel
-@attrs.define(frozen=True, kw_only=True)
-class BentArmPenalty(JointPositionPenalty):
-    @classmethod
-    def create_penalty(
-        cls,
-        physics_model: ksim.PhysicsModel,
-        scale: float = -1.0,
-        scale_by_curriculum: bool = False,
-    ) -> Self:
-        return cls.create_from_names(
-            names=[
-                "dof_right_shoulder_pitch_03",
-                "dof_right_shoulder_roll_03",
-                "dof_right_shoulder_yaw_02",
-                "dof_right_elbow_02",
-                "dof_right_wrist_00",
-                "dof_left_shoulder_pitch_03",
-                "dof_left_shoulder_roll_03",
-                "dof_left_shoulder_yaw_02",
-                "dof_left_elbow_02",
-                "dof_left_wrist_00",
-            ],
-            physics_model=physics_model,
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
-
-
 @attrs.define(frozen=True, kw_only=True)
 class ArmPositionReward(JointPositionPenalty):
     error_scale: float = attrs.field(default=0.1)
@@ -330,6 +301,23 @@ class ArmPositionReward(JointPositionPenalty):
         error = super().get_reward(trajectory)
         reward = jnp.exp(-error / self.error_scale)
         return reward
+
+@attrs.define(frozen=True, kw_only=True)
+class ActionVelocityReward(ksim.Reward):
+    """Reward for first derivative change in consecutive actions."""
+
+    error_scale: float = attrs.field(default=0.25)
+    norm: xax.NormType = attrs.field(default="l2")
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        actions = trajectory.action
+        actions_zp = jnp.pad(actions, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done[..., :-1], ((1, 0),), mode="edge")[..., None]
+        actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
+        error = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        error = jnp.where(is_zero_cmd, error, error**2)
+        return jnp.exp(-error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1121,21 +1109,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.02),
-            # ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
+            ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
+            ActionVelocityReward(scale=0.05, error_scale=0.01),
             # ksim.CtrlPenalty(scale=-0.00001),
-            # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
-            # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
-            # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
-            # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
-            # BUG: wrong sensors
-            # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-            #     scale=-0.03,
-            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            # ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
