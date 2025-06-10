@@ -102,22 +102,19 @@ def main() -> None:
         heading_yaw_cmd = command[..., 2]
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
 
-        initial_heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, -initial_heading.squeeze()]))
-        relative_quat = rotate_quat_by_quat(quaternion, initial_heading_quat, inverse=False)
-        backspun_framequat = rotate_quat_by_quat(relative_quat, heading_yaw_cmd_quat, inverse=True)
-  
-        vel_cmd = command[..., :2] # vx, vy
-        yaw_cmd = command[..., 2:3] # absolute yaw
-        zero_bh = jnp.zeros_like(command[..., 3:4]) # placeholder for bh (kept at 0 during training)
-        base_xy = command[..., 4:] # rx, ry
-        cmd_for_net = jnp.concatenate([vel_cmd, yaw_cmd, zero_bh, base_xy], axis=-1)
+        initial_heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, initial_heading.squeeze()]))
+        relative_quaternion = rotate_quat_by_quat(quaternion, initial_heading_quat, inverse=True)
+
+        backspun_quat = rotate_quat_by_quat(relative_quaternion, heading_yaw_cmd_quat, inverse=True)
+
+        positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
-                backspun_framequat,
-                cmd_for_net,
+                positive_backspun_quat,
+                command,
                 gyroscope,
             ],
             axis=-1,

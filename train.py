@@ -66,12 +66,12 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc_gyro: bool = xax.field(
+    use_gyro: bool = xax.field(
         value=True,
-        help="Whether to use the IMU acceleration and gyroscope observations.",
+        help="Whether to use the IMU gyroscope observations.",
     )
-
-    # Curriculum parameters.
+    
+    # Curriculum parameters
     num_curriculum_levels: int = xax.field(
         value=30,
         help="The number of curriculum levels to use.",
@@ -89,7 +89,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The minimum number of steps to wait before changing the curriculum level.",
     )
     min_level: float = xax.field(
-        value=0.01,
+        value=0.5,
         help="The minimum curriculum level.",
     )
 
@@ -212,8 +212,6 @@ class FeetAirtimeReward(ksim.StatefulReward):
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
     scale_by_curriculum: bool = False
-    max_airtime_seconds_range: tuple[float, float] = (0.3, 0.9)
-    cmd_norm_ref: float = 1.5
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         # initial left and right airtime
@@ -249,28 +247,13 @@ class FeetAirtimeReward(ksim.StatefulReward):
         td_l = touchdown(left_contact)
         td_r = touchdown(right_contact)
 
-        cmd_speed = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1)
+        left_air_shifted = jnp.roll(left_air, 1)
+        right_air_shifted = jnp.roll(right_air, 1)
 
-        cap = (
-            self.max_airtime_seconds_range[0]
-            + (self.max_airtime_seconds_range[1] - self.max_airtime_seconds_range[0])
-            * jnp.clip(cmd_speed / self.cmd_norm_ref, 0.0, 1.0)
-        )
+        left_feet_airtime_reward = (left_air_shifted - self.touchdown_penalty) * td_l.astype(jnp.float32)
+        right_feet_airtime_reward = (right_air_shifted - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
-        left_air_capped = jnp.minimum(left_air, cap)
-        right_air_capped = jnp.minimum(right_air, cap)
-
-        touchdown_bonus = (
-            jnp.where(td_l, left_air_capped, 0.0)
-            + jnp.where(td_r, right_air_capped, 0.0)
-        )
-
-        touchdown_penalty = (
-            (td_l.astype(jnp.float32) + td_r.astype(jnp.float32))
-            * self.touchdown_penalty
-        )
-
-        reward = touchdown_bonus - touchdown_penalty
+        reward = left_feet_airtime_reward + right_feet_airtime_reward
 
         # standing mask
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
@@ -432,8 +415,8 @@ class BaseHeightReward(ksim.Reward):
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
 
         height_error = jnp.abs(current_height - commanded_height)
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        height_error = jnp.where(is_zero_cmd, height_error, height_error**2)  # smooth kernel for walking.
+        # is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        # height_error = jnp.where(is_zero_cmd, height_error, height_error**2)  # smooth kernel for walking.
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -603,7 +586,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         # spin back
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
         backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
-        # ensure positive quathemisphere
+        # ensure positive quat hemisphere
         backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
 
         # Get current Kalman filter state
@@ -1025,23 +1008,23 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ArmatureRandomizer(),
             ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
             ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.3, scale_upper=1.5
+                model=physics_model, floor_geom_name="floor", scale_lower=0.4, scale_upper=0.8
             ),
         ]
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_linvel=0.5,
-                y_linvel=0.5,
-                z_linvel=0.3,
-                vel_range=(0.2, 1.5),
-                x_angvel=0.0,  # 0.4
-                y_angvel=0.0,
-                z_angvel=0.0,
-                interval_range=(2.0, 6.0),
+                x_linvel=0.7,
+                y_linvel=0.7,
+                z_linvel=0.7,
+                vel_range=(0.5, 2.0),
+                x_angvel=0.7,
+                y_angvel=0.7,
+                z_angvel=0.7,
+                interval_range=(4.0, 8.0),
             ),
         ]
 
@@ -1109,15 +1092,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
+            ksim.StayAliveReward(scale=1.0),
             # cmd
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=1.0),
+            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
             SimpleSingleFootContactReward(scale=0.1),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.2),
+            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.02),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
@@ -1139,7 +1123,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
-            ksim.EpisodeLengthTermination(max_length_sec=24),
+            # ksim.EpisodeLengthTermination(max_length_sec=24),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
@@ -1156,7 +1140,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_commands = (
             2  # linear velocity command (vx, vy)
-            + 1  # angular velocity command (yaw)
+            + 1  # angular velocity command yaw)
             + 1  # base height command
             + 2  # base xy orientation command (rx, ry)
         )
@@ -1165,13 +1149,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             num_joints * 2  # joint pos and vel
             + 4  # imu quat
             + num_commands
-            + (3 if self.config.use_acc_gyro else 0)  # imu_gyro
+            + (3 if self.config.use_gyro else 0)  # imu_gyro
         )
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
             + 4  # imu quat
-            + num_commands + 1 # yaw rate
+            + num_commands + 1
             + 3  # imu gyro
             + 2  # feet touch
             + 6  # feet position
@@ -1215,12 +1199,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
-            cmd[..., :2], # skip yaw rate
-            cmd[..., 3:4],
-            jnp.zeros_like(cmd[..., 4:5]),
-            cmd[..., 5:],
+            cmd[..., :2],
+            cmd[..., 3:4], # Use absolute yaw command only
+            cmd[..., 4:],
         ]
-        if self.config.use_acc_gyro:
+        if self.config.use_gyro:
             obs += [
                 imu_gyro_3,  # 3
             ]
