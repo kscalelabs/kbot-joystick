@@ -248,6 +248,7 @@ class JointPositionPenalty(ksim.JointDeviationPenalty):
         physics_model: ksim.PhysicsModel,
         scale: float = -1.0,
         scale_by_curriculum: bool = False,
+        error_scale: float = 0.1,
     ) -> Self:
         zeros = {k: v for k, v, _ in ZEROS}
         weights = {k: v for k, _, v in ZEROS}
@@ -291,6 +292,44 @@ class BentArmPenalty(JointPositionPenalty):
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
+
+
+@attrs.define(frozen=True, kw_only=True)
+class ArmPositionReward(JointPositionPenalty):
+    error_scale: float = attrs.field(default=0.1)
+
+    @classmethod
+    def create_reward(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = 0.05,
+        error_scale: float = 0.1,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        reward = cls.create_from_names(
+            names=[
+                "dof_right_shoulder_pitch_03",
+                "dof_right_shoulder_roll_03",
+                "dof_right_shoulder_yaw_02",
+                "dof_right_elbow_02",
+                "dof_right_wrist_00",
+                "dof_left_shoulder_pitch_03",
+                "dof_left_shoulder_roll_03",
+                "dof_left_shoulder_yaw_02",
+                "dof_left_elbow_02",
+                "dof_left_wrist_00",
+            ],
+            physics_model=physics_model,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+            error_scale=error_scale,
+        )
+        return reward
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        error = super().get_reward(trajectory)
+        reward = jnp.exp(-error / self.error_scale)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1083,6 +1122,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.02),
+            # ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.CtrlPenalty(scale=-0.00001),
