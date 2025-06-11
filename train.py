@@ -360,6 +360,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
     linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
     command_name: str = attrs.field(default="unified_command")
     norm: xax.NormType = attrs.field(default="l2")
+    stand_still_threshold: float = attrs.field(default=1e-2)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # need to get lin vel obs from sensor, because xvel is not available in Trajectory.
@@ -384,7 +385,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         global_vel_xy = global_vel[:, :2]
 
         # now compute error. special trick: different kernels for standing and walking.
-        zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < self.stand_still_threshold
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, 2 * jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
@@ -1042,7 +1043,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.25),
             ksim.JointDampingRandomizer(),
             ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
             ksim.FloorFrictionRandomizer.from_geom_name(
@@ -1087,10 +1088,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=math.radians(30),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_touch", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_touch", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_force", noise=0.0),
+            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_force", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_linvel", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_angvel", noise=0.0),
             FeetPositionObservation.create(
@@ -1105,7 +1108,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                noise=math.radians(1),
+                noise=0.1,
             ),
         ]
 
@@ -1122,7 +1125,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 ctrl_dt=self.config.ctrl_dt,
-                switch_prob=self.config.ctrl_dt / 3,  # once per x seconds
+                switch_prob=self.config.ctrl_dt / 4,  # once per x seconds
             ),
         ]
 
@@ -1137,31 +1140,32 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SimpleSingleFootContactReward(scale=0.3),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            FeetAirtimeReward(scale=2.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.6),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.05),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
+            ksim.ActionVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.CtrlPenalty(scale=-0.00001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
-            # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=False),
+            ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # BUG: wrong sensors
-            # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-            #     scale=-0.03,
-            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            # ),
+            ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
+                scale=-0.03,
+                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
-            # ksim.EpisodeLengthTermination(max_length_sec=24),
+            ksim.EpisodeLengthTermination(max_length_sec=80),
         ]
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
@@ -1400,12 +1404,13 @@ if __name__ == "__main__":
             rollout_length_seconds=8.0,
             global_grad_clip=2.0,
             entropy_coef=0.004,
+            gamma=0.96,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
-            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
+            action_latency_range=(0.001, 0.01),  # Simulate 3-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
