@@ -49,6 +49,12 @@ ZEROS: list[tuple[str, float, float]] = [
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
+    # Task parameters.
+    randomize_arm_command: bool = xax.field(
+        value=True,
+        help="Whether to randomize the arm command.",
+    )
+
     # Model parameters.
     hidden_size: int = xax.field(
         value=128,
@@ -479,6 +485,19 @@ class FeetPositionReward(ksim.Reward):
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
+    
+@attrs.define(frozen=True, kw_only=True)
+class ArmReward(ksim.Reward):
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        arm_cmd = trajectory.command["arm_command"]
+        steps_remaining = arm_cmd[..., :1]
+        num_steps = arm_cmd[..., 1:2]
+        arm_ids = arm_cmd[..., 2:12].round().astype(jnp.int32)
+        start_arm_pos = arm_cmd[..., 12:22]
+        target_arm_pos = arm_cmd[..., 22:32]
+        cur_arm_pos = target_arm_pos + (start_arm_pos - target_arm_pos) * (steps_remaining / num_steps)
+        arm_qpos = jnp.take_along_axis(trajectory.qpos, arm_ids + 7, axis=-1)
+        return ksim.norm_to_reward(xax.get_norm(cur_arm_pos - arm_qpos, "l2").sum(axis=-1))
 
 
 @attrs.define(frozen=True)
@@ -819,6 +838,96 @@ class UnifiedCommand(ksim.Command):
             ),
         ]
 
+@attrs.define(frozen=True, kw_only=True)
+class ArmCommand(ksim.Command):
+    arm_ids: xax.HashableArray = attrs.field()
+    arm_mins: xax.HashableArray = attrs.field()
+    arm_maxes: xax.HashableArray = attrs.field()
+    min_steps: float = attrs.field()
+    max_steps: float = attrs.field()
+    randomize_arm_command: bool = attrs.field(default=True)
+
+    @classmethod
+    def create(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        dt: float,
+        min_seconds: float = 0.5,
+        max_seconds: float = 2.0,
+        randomize_arm_command: bool = True,
+    ) -> Self:
+        arm_names = [
+            "dof_right_shoulder_pitch_03",
+            "dof_right_shoulder_roll_03",
+            "dof_right_shoulder_yaw_02",
+            "dof_right_elbow_02",
+            "dof_right_wrist_00",
+            "dof_left_shoulder_pitch_03",
+            "dof_left_shoulder_roll_03",
+            "dof_left_shoulder_yaw_02",
+            "dof_left_elbow_02",
+            "dof_left_wrist_00",
+        ]
+        joint_names = ksim.get_joint_names_in_order(physics_model)
+        arm_ids = jnp.array([joint_names.index(name) for name in arm_names])
+
+        arm_ranges = physics_model.jnt_range[arm_ids]
+        arm_mins, arm_maxes = arm_ranges[..., 0], arm_ranges[..., 1]
+
+        return cls(
+            arm_ids=xax.hashable_array(arm_ids - 1),
+            arm_mins=xax.hashable_array(arm_mins),
+            arm_maxes=xax.hashable_array(arm_maxes),
+            min_steps=min_seconds / dt,
+            max_steps=max_seconds / dt,
+            randomize_arm_command=randomize_arm_command,
+        )
+
+    def _sample(self, physics_data: ksim.PhysicsData, rng: PRNGKeyArray) -> Array:
+        arm_ids = self.arm_ids.array
+        pos_rng, step_rng = jax.random.split(rng)
+
+        if self.randomize_arm_command:
+            target_positions = jax.random.uniform(
+                pos_rng,
+                self.arm_mins.array.shape,
+                minval=self.arm_mins.array,
+                maxval=self.arm_maxes.array,
+            )
+        else:
+            target_positions = jnp.array([pos for _, pos, _ in ZEROS[:10]])
+
+        start_positions = physics_data.qpos[..., arm_ids + 7]
+        steps_remaining = jax.random.uniform(step_rng, shape=(1,), minval=self.min_steps, maxval=self.max_steps)
+        return jnp.concatenate(
+            [
+                steps_remaining,
+                steps_remaining,
+                arm_ids.astype(start_positions.dtype),
+                start_positions,
+                target_positions,
+            ],
+            axis=-1,
+        )
+
+    def initial_command(
+        self,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        return self._sample(physics_data, rng)
+
+    def __call__(
+        self,
+        prev_command: Array,
+        physics_data: ksim.PhysicsData,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> Array:
+        steps_remaining = prev_command[..., 0] - 1.0
+        is_done = steps_remaining <= 0
+        return jnp.where(is_done, self._sample(physics_data, rng), prev_command.at[..., 0].set(steps_remaining))
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -1122,10 +1231,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bh_range=(0.0, 0.0),  # m # disabled for now, does not work on this robot. reward conflicts
                 bh_standing_range=(-0.2, 0.0), # m
                 # bh_standing_range=(0.0, 0.0),  # m
-                rx_range=(-0.3, 0.3),  # rad
-                ry_range=(-0.3, 0.3),  # rad
+                rx_range=(-0.5, 0.5),  # rad
+                ry_range=(-0.5, 0.5),  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 4,  # once per x seconds
+            ),
+            ArmCommand.create(
+                physics_model=physics_model,
+                dt=self.config.ctrl_dt,
+                randomize_arm_command=self.config.randomize_arm_command,
             ),
         ]
 
@@ -1142,7 +1256,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=2.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.6),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.05),
+            # BentArmPenalty.create_penalty(physics_model, scale=-0.05),
+            ArmReward(scale=1.0),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
@@ -1185,6 +1300,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 1  # angular velocity command yaw)
             + 1  # base height command
             + 2  # base xy orientation command (rx, ry)
+            + 10  # arm command (target arm pos)
         )
 
         num_actor_inputs = (
@@ -1236,6 +1352,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
+        arm_cmd = commands["arm_command"]
+        start_arm_pos = arm_cmd[..., 12:22]
+        target_arm_pos = arm_cmd[..., 22:32]
+
+        steps_remaining = arm_cmd[..., :1]
+        num_steps = arm_cmd[..., 1:2]
+        cur_arm_pos = target_arm_pos + (start_arm_pos - target_arm_pos) * (steps_remaining / num_steps)
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
@@ -1244,13 +1367,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             cmd[..., :2],
             cmd[..., 3:4], # Use absolute yaw command only
             cmd[..., 4:],
+            cur_arm_pos,
         ]
+
         if self.config.use_gyro:
             obs += [
                 imu_gyro_3,  # 3
             ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
+
         action, carry = model.forward(obs_n, carry)
 
         return action, carry
@@ -1267,6 +1393,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
+
+        arm_cmd = commands["arm_command"]
+        start_arm_pos = arm_cmd[..., 12:22]
+        target_arm_pos = arm_cmd[..., 22:32]
+
+        steps_remaining = arm_cmd[..., :1]
+        num_steps = arm_cmd[..., 1:2]
+        cur_arm_pos = target_arm_pos + (start_arm_pos - target_arm_pos) * (steps_remaining / num_steps)
 
         # privileged obs
         left_touch = observations["sensor_observation_left_foot_touch"]
@@ -1287,9 +1421,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_pos_n,
                 joint_vel_n / 10.0,  # TODO fix this
                 imu_quat_4,
-                cmd[..., :3],
-                jnp.zeros_like(cmd[..., 3:4]),
-                cmd[..., 4:],
+                cmd,
+                cur_arm_pos,
                 imu_gyro_3,  # rad/s
                 # privileged obs:
                 left_touch,
