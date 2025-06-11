@@ -302,6 +302,7 @@ class ArmPositionReward(JointPositionPenalty):
         reward = jnp.exp(-error / self.error_scale)
         return reward
 
+
 @attrs.define(frozen=True, kw_only=True)
 class ActionVelocityReward(ksim.Reward):
     """Reward for first derivative change in consecutive actions."""
@@ -1105,7 +1106,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
-            SimpleSingleFootContactReward(scale=0.1),
+            SimpleSingleFootContactReward(scale=0.15),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
@@ -1357,6 +1358,7 @@ if __name__ == "__main__":
             rollout_length_seconds=2.0,  # temporarily putting this lower to go faster
             global_grad_clip=2.0,
             entropy_coef=0.004,
+            gamma=0.92,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
