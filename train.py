@@ -33,7 +33,7 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
     ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
     ("dof_right_knee_04", math.radians(-50.0), 0.01),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
@@ -315,6 +315,42 @@ class BentArmPenalty(JointPositionPenalty):
             scale_by_curriculum=scale_by_curriculum,
         )
 
+@attrs.define(frozen=True, kw_only=True)
+class StraightLegPenalty(JointPositionPenalty):
+    @classmethod
+    def create_penalty(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        return cls.create_from_names(
+            names=[
+                "dof_left_hip_roll_03",
+                "dof_left_hip_yaw_03",
+                "dof_right_hip_roll_03",
+                "dof_right_hip_yaw_03",
+            ],
+            physics_model=physics_model,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
+class AnkleKneePenalty(JointPositionPenalty):
+    @classmethod
+    def create_penalty(
+        cls,
+        physics_model: ksim.PhysicsModel,
+        scale: float = -1.0,
+        scale_by_curriculum: bool = False,
+    ) -> Self:
+        return cls.create_from_names(
+            names=["dof_left_knee_04", "dof_left_ankle_02", "dof_right_knee_04", "dof_right_ankle_02"],
+            physics_model=physics_model,
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
 
 @attrs.define(frozen=True, kw_only=True)
 class LinearVelocityTrackingReward(ksim.Reward):
@@ -1076,7 +1112,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             UnifiedCommand(
-                vx_range=(-0.5, 2.0),  # m/s
+                vx_range=(-0.75, 2.0),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-0.5, 0.5),  # rad/s
                 # bh_range=(-0.05, 0.05), # m
@@ -1094,16 +1130,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StayAliveReward(scale=1.0),
             # cmd
-            LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
+            LinearVelocityTrackingReward(scale=0.8, error_scale=0.2),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
-            SimpleSingleFootContactReward(scale=0.1),
+            SimpleSingleFootContactReward(scale=0.3),
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
-            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.02),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.05),
+            StraightLegPenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
+            AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
             # ksim.CtrlPenalty(scale=-0.00001),
@@ -1359,7 +1397,7 @@ if __name__ == "__main__":
             batch_size=256,
             num_passes=4,
             epochs_per_log_step=1,
-            rollout_length_seconds=2.0,  # temporarily putting this lower to go faster
+            rollout_length_seconds=8.0,
             global_grad_clip=2.0,
             entropy_coef=0.004,
             # Simulation parameters.
