@@ -1239,6 +1239,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ArmCommand.create(
                 physics_model=physics_model,
                 dt=self.config.ctrl_dt,
+                min_seconds=0.1,
                 randomize_arm_command=self.config.randomize_arm_command,
             ),
         ]
@@ -1265,6 +1266,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ActionVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.CtrlPenalty(scale=-0.00001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
+            ksim.JointVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
