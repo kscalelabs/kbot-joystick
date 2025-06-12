@@ -728,9 +728,9 @@ class UnifiedCommand(ksim.Command):
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
         # don't like super small velocity commands
-        vx = jnp.where(jnp.abs(vx) < 0.09, 0.0, vx)
-        vy = jnp.where(jnp.abs(vy) < 0.09, 0.0, vy)
-        wz = jnp.where(jnp.abs(wz) < 0.09, 0.0, wz)
+        vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
+        vy = jnp.where(jnp.abs(vy) < 0.05, 0.0, vy)
+        wz = jnp.where(jnp.abs(wz) < 0.05, 0.0, wz)
 
         _ = jnp.zeros_like(vx)
 
@@ -739,7 +739,8 @@ class UnifiedCommand(ksim.Command):
         sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _])
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
-        stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        stand_cmd = jnp.concatenate([_, _, _, bhs, _, _])
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
@@ -750,7 +751,7 @@ class UnifiedCommand(ksim.Command):
                 lambda: sideways_cmd,
                 lambda: rotate_cmd,
                 lambda: omni_cmd,
-                lambda: stand_cmd,
+                lambda: stand_bend_cmd,
                 lambda: stand_cmd,
             ],
         )
@@ -1106,14 +1107,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             XYOrientationReward(scale=0.2, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
-            SimpleSingleFootContactReward(scale=0.15),
-            # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
+            # SimpleSingleFootContactReward(scale=0.15),
+            SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ActionVelocityReward(scale=0.05, error_scale=0.01),
+            ActionVelocityReward(scale=0.05, error_scale=0.01, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
