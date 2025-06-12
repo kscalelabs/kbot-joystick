@@ -3,7 +3,7 @@
 import argparse
 import math
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Literal, cast
 
 import jax
 import jax.numpy as jnp
@@ -13,10 +13,11 @@ import xax
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
+from mujoco_animator import MjAnim
 
 from train import HumanoidWalkingTask, Model, rotate_quat_by_quat
 
-NUM_COMMANDS_MODEL = 6
+NUM_COMMANDS_MODEL = 6 + 3 # 6 user commands + 3 arm commands
 
 def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
     """Rotates one quaternion by another quaternion through quaternion multiplication.
@@ -70,35 +71,118 @@ def main() -> None:
     task: HumanoidWalkingTask = HumanoidWalkingTask.load_task(ckpt_path)
     model: Model = task.load_ckpt(ckpt_path, part="model")[0]
 
-    # Loads the Mujoco model and gets the joint names.
     mujoco_model = task.get_mujoco_model()
-    joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
+    joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]
 
-    # Constant values.
-    carry_shape = (task.config.depth, task.config.hidden_size) # (3, 128) hiddens
-    num_joints = len(joint_names) # 20, joints outputs
-    num_commands = NUM_COMMANDS_MODEL
+    # Load arm animations
+    arm_animations = Path(__file__).parent / "animations"
+    dt = task.config.ctrl_dt
+    interp = "linear"
+    interp = cast(Literal["linear", "cubic"], interp)
+
+    # Load all arm animations
+    home_anim = MjAnim.load(arm_animations / "home.mjanim").to_numpy(dt, interp=interp)
+    home_to_wave_anim = MjAnim.load(arm_animations / "home_to_wave.mjanim").to_numpy(dt, interp=interp)
+    wave_anim = MjAnim.load(arm_animations / "wave.mjanim").to_numpy(dt, interp=interp)
+    wave_to_home_anim = MjAnim.load(arm_animations / "wave_to_home.mjanim").to_numpy(dt, interp=interp)
+    punch_anim = MjAnim.load(arm_animations / "punch.mjanim").to_numpy(dt, interp=interp)
+
+    # Animation constants
+    lengths = jnp.array(
+        [
+            home_anim.shape[0],
+            home_to_wave_anim.shape[0],
+            wave_anim.shape[0],
+            wave_to_home_anim.shape[0],
+            punch_anim.shape[0],
+        ],
+        dtype=jnp.int32,
+    )
+
+    starts = jnp.concatenate([jnp.zeros(1, dtype=jnp.int32), jnp.cumsum(lengths)[:-1]])
+
+    anims = jnp.concatenate(
+        [
+            home_anim[..., 7:17], # take arm joints only
+            home_to_wave_anim[..., 7:17],
+            wave_anim[..., 7:17],
+            wave_to_home_anim[..., 7:17],
+            punch_anim[..., 7:17],
+        ],
+        axis=0,
+    )
+
+    # Transition table: [current_cmd_id, desired_user_cmd] -> next_cmd_id
+    # User commands: 0=home, 1=wave, 2=punch
+    transition_table = jnp.array(
+        [
+            # desired: home wave punch
+            [0, 1, 4],  # cur home (0)
+            [3, 2, 3],  # cur home_to_wave (1) - must go through wave_to_home first
+            [3, 2, 3],  # cur wave (2) - must go through wave_to_home first
+            [0, 1, 4],  # cur wave_to_home (3) - can go anywhere from home
+            [0, 1, 4],  # cur punch (4) - can go anywhere from home
+        ],
+        dtype=jnp.int32,
+    )
+
+    # Carry layout: [rnn_state(D*H), cmd_id(1), cmd_step(1)]
+    rnn_size = task.config.depth * task.config.hidden_size
+    cmd_state = 2
+    carry_size = rnn_size + cmd_state
+
+    def split_carry(flat_carry: Array) -> tuple[Array, Array, Array]:
+        rnn = flat_carry[:rnn_size].reshape(task.config.depth, task.config.hidden_size)
+        cmd_id = flat_carry[rnn_size : rnn_size + 1].round().astype(jnp.int32)
+        cmd_step = flat_carry[rnn_size + 1 :].round().astype(jnp.int32)
+        return rnn, cmd_id, cmd_step
+
+    def merge_carry(rnn: Array, cmd_id: Array, cmd_step: Array) -> Array:
+        return jnp.concatenate([rnn.reshape(-1), cmd_id.astype(jnp.float32), cmd_step.astype(jnp.float32)], axis=-1)
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=num_commands,
-        carry_size=carry_shape,
+        num_commands=NUM_COMMANDS_MODEL,
+        carry_size=(carry_size,),
     )
 
     @jax.jit
     def init_fn() -> Array:
-        return jnp.zeros(carry_shape)
+        rnn = jnp.zeros((task.config.depth, task.config.hidden_size))
+        cmd_id = jnp.zeros(1, dtype=jnp.int32)  # Start with home
+        cmd_step = jnp.zeros(1, dtype=jnp.int32)
+        return merge_carry(rnn, cmd_id, cmd_step)
 
     @jax.jit
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        quaternion: Array, # IMU quat
+        quaternion: Array,  # IMU quat
         initial_heading: Array,
-        command: Array, # (xvel, yvel, yaw, bh, rx, ry)
+        command: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        # Unpack carry
+        rnn, cmd_id, cmd_step = split_carry(carry)
+        cmd_id = cmd_id.squeeze()
+        cmd_step = cmd_step.squeeze()
+
+        # Determine desired command from user input
+        desired = jnp.argmax(command[..., 6:]).astype(jnp.int32)
+
+        # Check if current animation is finished
+        current_length = lengths[cmd_id]
+        is_finished = cmd_step + 1 >= current_length
+
+        # Update command state
+        next_cmd_id = jnp.where(is_finished, transition_table[cmd_id, desired], cmd_id)
+        next_cmd_step = jnp.where(is_finished, jnp.zeros_like(cmd_step), cmd_step + 1)
+
+        # Get current animation frame
+        anim_idx = starts[next_cmd_id] + next_cmd_step
+        cmd_val = anims[anim_idx]  # Joint angles for current frame
+
         # Back-spin IMU quaternion by the (absolute) yaw command
         heading_yaw_cmd = command[..., 2]
         heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
@@ -107,28 +191,27 @@ def main() -> None:
         relative_quaternion = rotate_quat_by_quat(quaternion, initial_heading_quat, inverse=True)
 
         backspun_quat = rotate_quat_by_quat(relative_quaternion, heading_yaw_cmd_quat, inverse=True)
-
         positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
-        default_arm_cmd = jnp.array([0.0, math.radians(-10.0), 0.0, math.radians(90.0), 0.0,
-                                     0.0, math.radians(10.0), 0.0, math.radians(-90.0), 0.0])
-        
-        t_pose_arm_cmd = jnp.array([0.0, math.radians(-70.0), 0.0, math.radians(90.0), 0.0,
-                                     0.0, math.radians(70.0), 0.0, math.radians(-90.0), 0.0])
-    
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
                 positive_backspun_quat,
-                command,
-                default_arm_cmd,
+                command[..., :6],
+                cmd_val,  # Current animation frame joint angles
                 gyroscope,
             ],
             axis=-1,
         )
-        dist, carry = model.actor.forward(obs, carry)
-        return dist.mode(), carry
+
+        dist, next_rnn = model.actor.forward(obs, rnn)
+        action = dist.mode()
+
+        # Pack updated carry
+        next_carry = merge_carry(next_rnn, next_cmd_id[None], next_cmd_step[None])
+
+        return action, next_carry
 
     init_onnx = export_fn(
         model=init_fn,
