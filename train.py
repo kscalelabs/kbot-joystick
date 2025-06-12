@@ -1142,12 +1142,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=2.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.6),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
-            BentArmPenalty.create_penalty(physics_model, scale=-0.05),
+            BentArmPenalty.create_penalty(physics_model, scale=-0.2),
             StraightLegPenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ksim.ActionVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.ActionVelocityPenalty(scale=-0.02, scale_by_curriculum=True),
             ksim.AngularVelocityPenalty(index=("x", "y"),scale=-0.001, scale_by_curriculum=True),
             # ksim.CtrlPenalty(scale=-0.00001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
@@ -1157,7 +1157,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # BUG: wrong sensors
             ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-                scale=-0.03,
+                scale=-0.05,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
         ]
