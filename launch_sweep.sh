@@ -10,6 +10,9 @@ fi
 
 NUM_GPUS=$1
 
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
 # Activate conda environment
 eval "$($HOME/miniconda/bin/conda shell.bash hook)"
 conda activate ksim
@@ -26,9 +29,10 @@ for i in $(seq 0 $(($NUM_GPUS-1)))
 do
     echo "Launching worker for GPU $i"
     # Start Xvfb with display number 10$i
-    Xvfb :10$i -ac &
+    nohup Xvfb :10$i -ac > logs/xvfb_$i.log 2>&1 &
+    
     # Set up clean environment for each worker
-    env -i \
+    nohup env -i \
         HOME=$HOME \
         PATH=$PATH \
         PYTHONPATH=$PYTHONPATH \
@@ -37,9 +41,10 @@ do
         MUJOCO_GL=egl \
         XLA_PYTHON_CLIENT_PREALLOCATE=false \
         XLA_PYTHON_CLIENT_MEM_FRACTION=0.95 \
-        python run_worker.py $i &
+        python run_worker.py $i > logs/worker_$i.log 2>&1 &
+
+    sleep 10
 done
 
-# Wait for all workers to complete
-wait
-echo "All workers completed"
+echo "All workers launched in background. Check logs/ directory for output."
+echo "Use 'ps aux | grep run_worker.py' to check running processes."
