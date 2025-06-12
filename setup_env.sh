@@ -13,6 +13,11 @@ conda create --name ksim --file conda-spec-file.txt python=3.11
 conda activate ksim
 pip install -r requirements.txt
 
+# Install Xvfb
+sudo apt-get install -y xvfb
+
+# Install dependencies for mujoco   
+sudo apt-get update && sudo apt-get install -y libosmesa6-dev libgl1-mesa-glx libglfw3 libglew-dev libegl1-mesa-dev
 
 echo "Environment setup complete! To activate the environment, run:"
 echo "conda activate ksim"

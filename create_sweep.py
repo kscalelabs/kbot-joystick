@@ -36,7 +36,7 @@ def get_all_commands():
 
         # Convert to command line args
         cmd_args = " ".join([f"{k}={v}" for k, v in param_dict.items()])
-        cmd = f"python -m train {cmd_args}"
+        cmd = f"python -m train {cmd_args} disable_multiprocessing=true"
         commands.append(cmd)
 
     # randomize order so results will be useful even after early stopping
