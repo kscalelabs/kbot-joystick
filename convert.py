@@ -1,6 +1,7 @@
 """Converts a checkpoint to a deployable model."""
 
 import argparse
+import math
 from pathlib import Path
 from typing import Callable
 
@@ -109,12 +110,19 @@ def main() -> None:
 
         positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
+        default_arm_cmd = jnp.array([0.0, math.radians(-10.0), 0.0, math.radians(90.0), 0.0,
+                                     0.0, math.radians(10.0), 0.0, math.radians(-90.0), 0.0])
+        
+        t_pose_arm_cmd = jnp.array([0.0, math.radians(-70.0), 0.0, math.radians(90.0), 0.0,
+                                     0.0, math.radians(70.0), 0.0, math.radians(-90.0), 0.0])
+    
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
                 positive_backspun_quat,
                 command,
+                default_arm_cmd,
                 gyroscope,
             ],
             axis=-1,
