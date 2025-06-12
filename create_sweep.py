@@ -28,7 +28,7 @@ def get_all_commands():
         param_dict = dict(zip(keys, items))
 
         # Add exp_dir
-        exp_dir = f"sweep__entropy_coef{param_dict['entropy_coef']}_gamma{param_dict['gamma']}_num_passes{param_dict['num_passes']}_lam{param_dict['lam']}_lr{param_dict['learning_rate']}"
+        exp_dir = f"sweep_runs/logs/sweep__entropy_coef{param_dict['entropy_coef']}_gamma{param_dict['gamma']}_num_passes{param_dict['num_passes']}_lam{param_dict['lam']}_lr{param_dict['learning_rate']}"
         param_dict["exp_dir"] = exp_dir
 
         # Add max_steps
@@ -36,7 +36,7 @@ def get_all_commands():
 
         # Convert to command line args
         cmd_args = " ".join([f"{k}={v}" for k, v in param_dict.items()])
-        cmd = f"python -m train {cmd_args} disable_multiprocessing=true"
+        cmd = f"python -m train {cmd_args} disable_multiprocessing=true render_full_every_n_seconds=9999999999"
         commands.append(cmd)
 
     # randomize order so results will be useful even after early stopping
@@ -52,6 +52,8 @@ def main():
     # Create sweep directory
     sweep_dir = Path("sweep_runs")
     sweep_dir.mkdir(exist_ok=True)
+    log_dir = sweep_dir / "logs"
+    log_dir.mkdir(exist_ok=True)
     
     # Save commands to file, one per line
     command_file = sweep_dir / "pending_commands.txt"
