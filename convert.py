@@ -81,11 +81,11 @@ def main() -> None:
     interp = cast(Literal["linear", "cubic"], interp)
 
     # Load all arm animations
-    home_anim = MjAnim.load(arm_animations / "home.mjanim").to_numpy(dt, interp=interp)
-    home_to_wave_anim = MjAnim.load(arm_animations / "home_to_wave.mjanim").to_numpy(dt, interp=interp)
-    wave_anim = MjAnim.load(arm_animations / "wave.mjanim").to_numpy(dt, interp=interp)
-    wave_to_home_anim = MjAnim.load(arm_animations / "wave_to_home.mjanim").to_numpy(dt, interp=interp)
-    punch_anim = MjAnim.load(arm_animations / "punch.mjanim").to_numpy(dt, interp=interp)
+    home_anim = MjAnim.load(arm_animations / "home.mjanim").to_numpy(dt, interp=interp, loop=False)
+    home_to_wave_anim = MjAnim.load(arm_animations / "home_to_wave.mjanim").to_numpy(dt, interp=interp, loop=False)
+    wave_anim = MjAnim.load(arm_animations / "wave.mjanim").to_numpy(dt, interp=interp, loop=False)
+    wave_to_home_anim = MjAnim.load(arm_animations / "wave_to_home.mjanim").to_numpy(dt, interp=interp, loop=False)
+    punch_anim = MjAnim.load(arm_animations / "punch.mjanim").to_numpy(dt, interp=interp, loop=False)
 
     # Animation constants
     lengths = jnp.array(
@@ -171,15 +171,15 @@ def main() -> None:
         # Determine desired command from user input
         desired = jnp.argmax(command[..., 6:]).astype(jnp.int32)
 
-        # Check if current animation is finished
+        # Check if current animation is finished  
         current_length = lengths[cmd_id]
-        is_finished = cmd_step + 1 >= current_length
+        is_finished = cmd_step >= current_length - 1
 
         # Update command state
         next_cmd_id = jnp.where(is_finished, transition_table[cmd_id, desired], cmd_id)
         next_cmd_step = jnp.where(is_finished, jnp.zeros_like(cmd_step), cmd_step + 1)
 
-        # Get current animation frame
+        # Get current animation frame using the updated values
         anim_idx = starts[next_cmd_id] + next_cmd_step
         cmd_val = anims[anim_idx]  # Joint angles for current frame
 
