@@ -791,14 +791,16 @@ class UnifiedCommand(ksim.Command):
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
         stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        stand_cmd_no_rx = jnp.concatenate([_, _, _, bhs, _, ry])
 
         # randomly select a mode
-        mode = jax.random.randint(rng_a, (), minval=0, maxval=6) # 0 1 2 3 4s 5s -- 2/6 standing
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=7) # 0 1 2 3 4s 5s -- 2/6 standing
         cmd = jnp.where(mode == 0, forward_cmd,
               jnp.where(mode == 1, sideways_cmd,
               jnp.where(mode == 2, rotate_cmd,
               jnp.where(mode == 3, omni_cmd,
-              stand_cmd))))
+              jnp.where(mode == 4, stand_cmd_no_rx,
+              stand_cmd))))) # 5, 6 standing
 
         # get initial heading
         init_euler = xax.quat_to_euler(physics_data.xquat[1])
@@ -1152,9 +1154,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.25),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.35),
             ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.4, scale_upper=0.8
             ),
@@ -1197,7 +1199,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(30),
+                noise=math.radians(10),
             ),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_touch", noise=0.0),
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_touch", noise=0.0),
@@ -1216,8 +1218,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ImuOrientationObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.1),
-                noise=0.1,
+                lag_range=(0.0, 0.05),
+                noise=0.02,
             ),
         ]
 
@@ -1250,7 +1252,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # cmd
             LinearVelocityTrackingReward(scale=0.8, error_scale=0.2),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
-            XYOrientationReward(scale=0.2, error_scale=0.03),
+            XYOrientationReward(scale=0.4, error_scale=0.03),
             BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
             # shaping
             SimpleSingleFootContactReward(scale=0.3),
@@ -1263,8 +1265,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.01, scale_by_curriculum=True),
             ksim.ActionVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
-            # ksim.CtrlPenalty(scale=-0.00001),
+            ksim.CtrlPenalty(scale=-0.00001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
             ksim.JointVelocityPenalty(scale=-0.01, scale_by_curriculum=True),
             ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
