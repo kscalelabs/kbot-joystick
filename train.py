@@ -772,14 +772,16 @@ class UnifiedCommand(ksim.Command):
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
         stand_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
+        stand_cmd_no_rx = jnp.concatenate([_, _, _, bhs, _, _])
 
         # randomly select a mode
-        mode = jax.random.randint(rng_a, (), minval=0, maxval=6) # 0 1 2 3 4s 5s -- 2/6 standing
+        mode = jax.random.randint(rng_a, (), minval=0, maxval=7) # 0 1 2 3 4s 5s -- 2/6 standing
         cmd = jnp.where(mode == 0, forward_cmd,
               jnp.where(mode == 1, sideways_cmd,
               jnp.where(mode == 2, rotate_cmd,
               jnp.where(mode == 3, omni_cmd,
-              stand_cmd))))
+              jnp.where(mode == 4, stand_cmd,
+              stand_cmd_no_rx))))) # 5, 6 standing
 
         # get initial heading
         init_euler = xax.quat_to_euler(physics_data.xquat[1])
@@ -1045,7 +1047,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.ArmatureRandomizer(),
             ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.85, scale_upper=1.25),
             ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-4), scale_upper=math.radians(4)),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
             ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.4, scale_upper=0.8
             ),
@@ -1107,7 +1109,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ImuOrientationObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.1),
+                lag_range=(0.0, 0.05),
                 noise=0.02,
             ),
         ]
@@ -1147,17 +1149,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ksim.ActionVelocityPenalty(scale=-0.02, scale_by_curriculum=True),
-            ksim.AngularVelocityPenalty(index=("x", "y"),scale=-0.001, scale_by_curriculum=True),
-            # ksim.CtrlPenalty(scale=-0.00001),
+            ksim.ActionVelocityPenalty(scale=-0.04, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"),scale=-0.01, scale_by_curriculum=True),
+            ksim.CtrlPenalty(scale=-0.00001, scale_by_curriculum=True),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
-            ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
+            ksim.JointAccelerationPenalty(scale=-0.04, scale_by_curriculum=True),
             # ksim.JointJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # BUG: wrong sensors
             ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-                scale=-0.05,
+                scale=-0.1,
                 sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
             ),
         ]
