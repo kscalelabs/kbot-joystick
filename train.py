@@ -1015,11 +1015,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
+            ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-3), scale_upper=math.radians(3)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.1, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
         ]
 
@@ -1114,7 +1114,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ActionVelocityReward(scale=0.05, error_scale=0.01, norm="l1"),
+            ActionVelocityReward(scale=0.05, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
@@ -1359,7 +1359,7 @@ if __name__ == "__main__":
             rollout_length_seconds=2.0,  # temporarily putting this lower to go faster
             global_grad_clip=2.0,
             entropy_coef=0.004,
-            gamma=0.92,
+            gamma=0.9,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
