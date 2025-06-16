@@ -5,15 +5,15 @@ import json
 from pathlib import Path
 import random
 
-MAX_STEPS = 3000 # about 4 hrs on rtx5000
+MAX_STEPS = 5000
 
 # Define the hyperparameters to sweep over
 SWEEP_PARAMS = {
-    "entropy_coef": [0.002, 0.004, 0.008], # 0.004
-    "gamma": [0.9, 0.93, 0.95, 0.97], # 0.92
-    "num_passes": [2, 4], # 4
-    "lam": [0.95, 0.97, 0.99], # 0.99
-    "learning_rate": [2e-4, 3e-4, 4e-4], # 3e-4
+    # "entropy_coef": [0.002, 0.004, 0.008], # 0.004
+    "gamma": [0.88, 0.90, 0.91, 0.92, 0.93], # 0.92
+    # "num_passes": [2, 4], # 4
+    "lam": [0.92, 0.93, 0.94, 0.95], # 0.95
+    "learning_rate": [3e-4, 4e-4, 5e-4], # 3e-4
 }
 
 def get_all_commands():
@@ -28,15 +28,17 @@ def get_all_commands():
         param_dict = dict(zip(keys, items))
 
         # Add exp_dir
-        exp_dir = f"sweep_runs/logs/sweep__entropy_coef{param_dict['entropy_coef']}_gamma{param_dict['gamma']}_num_passes{param_dict['num_passes']}_lam{param_dict['lam']}_lr{param_dict['learning_rate']}"
+        exp_dir = f"sweep_runs/logs/sweep__" + "_".join(f"{k}{v}" for k, v in param_dict.items())
         param_dict["exp_dir"] = exp_dir
 
         # Add max_steps
         param_dict["max_steps"] = MAX_STEPS
+        param_dict["disable_multiprocessing"] = True
+        param_dict["render_full_every_n_seconds"] = 9999999999
 
         # Convert to command line args
         cmd_args = " ".join([f"{k}={v}" for k, v in param_dict.items()])
-        cmd = f"python -m train {cmd_args} disable_multiprocessing=true render_full_every_n_seconds=9999999999"
+        cmd = f"python -m train {cmd_args}"
         commands.append(cmd)
 
     # randomize order so results will be useful even after early stopping
