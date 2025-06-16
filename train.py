@@ -457,15 +457,40 @@ class FeetOrientationReward(ksim.Reward):
     error_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        # compute error for standing
+        straight_foot_euler = jnp.stack(
+            [
+                jnp.full_like(trajectory.command["unified_command"][:, 3], -jnp.pi / 2),
+                jnp.zeros_like(trajectory.command["unified_command"][:, 3]),
+                trajectory.command["unified_command"][:, 3] - jnp.pi,  # include yaw
+            ],
+            axis=-1,
+        )
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
+
+        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 23, :], axis=-1) ** 2
+        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 18, :], axis=-1) ** 2
+        standing_error = left_quat_error + right_quat_error
+
+        # compute error for walking
         left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 23, :])
         right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 18, :])
 
-        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0], axis=-1)  # ignore yaw
+        # for walking, mask out yaw
+        left_foot_quat = xax.euler_to_quat(left_foot_euler.at[:, 2].set(0.0))
+        right_foot_quat = xax.euler_to_quat(right_foot_euler.at[:, 2].set(0.0))
 
-        left_error = jnp.abs(left_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
-        right_error = jnp.abs(right_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0, 0], axis=-1)
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
 
-        total_error = left_error + right_error
+        left_quat_error = 1 - jnp.sum(straight_foot_quat * left_foot_quat, axis=-1) ** 2
+        right_quat_error = 1 - jnp.sum(straight_foot_quat * right_foot_quat, axis=-1) ** 2
+        walking_error = left_quat_error + right_quat_error
+
+        # choose standing or walking error based on command
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        total_error = jnp.where(is_zero_cmd, standing_error, walking_error)
+
         return jnp.exp(-total_error / self.error_scale)
 
 
@@ -1110,7 +1135,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward(scale=0.1, error_scale=0.25),
+            FeetOrientationReward(scale=0.1, error_scale=0.025),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
