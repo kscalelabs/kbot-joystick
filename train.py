@@ -457,15 +457,40 @@ class FeetOrientationReward(ksim.Reward):
     error_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        # compute error for standing
+        straight_foot_euler = jnp.stack(
+            [
+                jnp.full_like(trajectory.command["unified_command"][:, 3], -jnp.pi / 2),
+                jnp.zeros_like(trajectory.command["unified_command"][:, 3]),
+                trajectory.command["unified_command"][:, 3] - jnp.pi,  # include yaw
+            ],
+            axis=-1,
+        )
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
+
+        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 23, :], axis=-1) ** 2
+        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 18, :], axis=-1) ** 2
+        standing_error = left_quat_error + right_quat_error
+
+        # compute error for walking
         left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 23, :])
         right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 18, :])
 
-        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0], axis=-1)  # ignore yaw
+        # for walking, mask out yaw
+        left_foot_quat = xax.euler_to_quat(left_foot_euler.at[:, 2].set(0.0))
+        right_foot_quat = xax.euler_to_quat(right_foot_euler.at[:, 2].set(0.0))
 
-        left_error = jnp.abs(left_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
-        right_error = jnp.abs(right_foot_euler[:, :2] - straight_foot_euler).sum(axis=-1)
+        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0, 0], axis=-1)
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
 
-        total_error = left_error + right_error
+        left_quat_error = 1 - jnp.sum(straight_foot_quat * left_foot_quat, axis=-1) ** 2
+        right_quat_error = 1 - jnp.sum(straight_foot_quat * right_foot_quat, axis=-1) ** 2
+        walking_error = left_quat_error + right_quat_error
+
+        # choose standing or walking error based on command
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        total_error = jnp.where(is_zero_cmd, standing_error, walking_error)
+
         return jnp.exp(-total_error / self.error_scale)
 
 
@@ -1015,11 +1040,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.StaticFrictionRandomizer(),
             ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.95, scale_upper=1.05),
-            ksim.JointDampingRandomizer(),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-2), scale_upper=math.radians(2)),
+            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
+            ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
+            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-3), scale_upper=math.radians(3)),
             ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.1, scale_upper=2.0
+                model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
         ]
 
@@ -1110,11 +1135,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward(scale=0.1, error_scale=0.25),
+            FeetOrientationReward(scale=0.1, error_scale=0.025),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ActionVelocityReward(scale=0.05, error_scale=0.01, norm="l1"),
+            ActionVelocityReward(scale=0.05, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
@@ -1359,7 +1384,7 @@ if __name__ == "__main__":
             rollout_length_seconds=2.0,  # temporarily putting this lower to go faster
             global_grad_clip=2.0,
             entropy_coef=0.004,
-            gamma=0.92,
+            gamma=0.9,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,

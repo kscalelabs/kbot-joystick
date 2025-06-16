@@ -98,7 +98,7 @@ kinfer
 kiwisolver==1.4.8
 kmv==0.3.14
 kscale==0.3.16
--e git+https://github.com/b-vm/ksim@0d8508587e5a2fd4305f84345c6bbd50b6c2043a#egg=ksim
+-e git+https://github.com/kscalelabs/ksim@1d97964497989fe5591f7a11fd8f49f58c266ff6#egg=ksim
 libclang==18.1.1
 Markdown==3.8
 markdown-it-py==3.0.0
