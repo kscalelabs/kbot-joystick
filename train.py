@@ -355,7 +355,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         # now compute error. special trick: different kernels for standing and walking.
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
-        error = jnp.where(zero_cmd_mask, vel_error, 2 * jnp.square(vel_error))
+        error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
         return jnp.exp(-error / self.error_scale)
 
 
@@ -1127,19 +1127,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # cmd
-            LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
+            LinearVelocityTrackingReward(scale=0.3, error_scale=0.05),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
-            XYOrientationReward(scale=0.2, error_scale=0.03),
+            XYOrientationReward(scale=0.1, error_scale=0.01),
             BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
-            SingleFootContactReward(scale=0.3, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
+            SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward(scale=0.1, error_scale=0.025),
+            FeetOrientationReward(scale=0.05, error_scale=0.02),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ActionVelocityReward(scale=0.02, error_scale=0.02, norm="l1"),
+            ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
