@@ -1120,7 +1120,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 ctrl_dt=self.config.ctrl_dt,
-                switch_prob=self.config.ctrl_dt / 3,  # once per x seconds
+                switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
             ),
         ]
 
@@ -1130,16 +1130,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
-            BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
+            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
-            SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
-            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            SingleFootContactReward(scale=0.3, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
+            FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.025),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ActionVelocityReward(scale=0.05, error_scale=0.02, norm="l1"),
+            ActionVelocityReward(scale=0.02, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
