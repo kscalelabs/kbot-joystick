@@ -1265,9 +1265,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AnkleKneePenalty.create_penalty(physics_model, scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.1, scale_by_curriculum=True),
+            ksim.AngularVelocityPenalty(index=("x", "y"), scale=-0.5, scale_by_curriculum=True),
             ksim.ActionVelocityPenalty(scale=-0.02, scale_by_curriculum=True),
-            ksim.CtrlPenalty(scale=-0.000001),
+            ksim.CtrlPenalty(scale=-0.00001),
             # ksim.ActionAccelerationPenalty(scale=-0.02, scale_by_curriculum=False),
             ksim.JointVelocityPenalty(scale=-0.001, scale_by_curriculum=True),
             # ksim.JointAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
@@ -1275,10 +1275,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ksim.LinkAccelerationPenalty(scale=-0.01, scale_by_curriculum=True),
             # ksim.LinkJerkPenalty(scale=-0.01, scale_by_curriculum=True),
             # BUG: wrong sensors
-            ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
-                scale=-0.02,
-                sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
-            ),
+            # ContactForcePenalty( # NOTE this could actually be good but eliminate until needed
+            #     scale=-0.02,
+            #     sensor_names=("sensor_observation_left_foot_force", "sensor_observation_right_foot_force"),
+            # ),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
@@ -1310,14 +1310,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            + 4  # imu quat
+            + 6  # imu orientation
             + num_commands
             + (3 if self.config.use_gyro else 0)  # imu_gyro
         )
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
-            + 4  # imu quat
+            + 6  # imu orientation
             + num_commands + 1
             + 3  # imu gyro
             + 2  # feet touch
@@ -1365,10 +1365,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         num_steps = arm_cmd[..., 1:2]
         cur_arm_pos = target_arm_pos + (start_arm_pos - target_arm_pos) * (steps_remaining / num_steps)
 
+        imu_orientation_6 = xax.rotation_matrix_to_rotation6d(xax.quat_to_rotmat(imu_quat_4))
+
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
-            imu_quat_4,  # 4
+            imu_orientation_6,  # 6
             cmd[..., :2],
             cmd[..., 3:4], # Use absolute yaw command only
             cmd[..., 4:],
@@ -1399,6 +1401,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         cmd = commands["unified_command"]
 
+        imu_orientation_6 = xax.rotation_matrix_to_rotation6d(xax.quat_to_rotmat(imu_quat_4))
         arm_cmd = commands["arm_command"]
         start_arm_pos = arm_cmd[..., 12:22]
         target_arm_pos = arm_cmd[..., 22:32]
@@ -1425,7 +1428,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 # actor obs:
                 joint_pos_n,
                 joint_vel_n / 10.0,  # TODO fix this
-                imu_quat_4,
+                imu_orientation_6,
                 cmd,
                 cur_arm_pos,
                 imu_gyro_3,  # rad/s
