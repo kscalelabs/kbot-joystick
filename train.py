@@ -72,7 +72,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     )
     # Optimizer parameters.
     learning_rate: float = xax.field(
-        value=3e-4,
+        value=5e-4,
         help="Learning rate for PPO.",
     )
     adam_weight_decay: float = xax.field(
@@ -179,6 +179,21 @@ class SingleFootContactReward(ksim.StatefulReward):
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, single_contact_grace.squeeze())
         return reward, carry
+
+
+class StandingReward(ksim.Reward):
+    """Reward for having both feet in contact with the ground."""
+
+    scale: float = 1.0
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
+        double = jnp.logical_and(left_contact, right_contact).squeeze()
+
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
+        reward = jnp.where(is_zero_cmd, double, 0.0)
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -765,7 +780,7 @@ class UnifiedCommand(ksim.Command):
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
         stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
-        stand_cmd = jnp.concatenate([_, _, _, bhs, _, _])
+        stand_cmd = jnp.concatenate([_, _, _, _, _, _])
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
@@ -1051,14 +1066,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.PushEvent(
-                x_linvel=0.5,
-                y_linvel=0.5,
-                z_linvel=0.3,
-                vel_range=(0.2, 0.8),
-                x_angvel=0.0,  # 0.4
+                x_linvel=0.0,
+                y_linvel=0.0,
+                z_linvel=0.0,
+                x_angvel=0.0,
                 y_angvel=0.0,
                 z_angvel=0.0,
-                interval_range=(4.0, 6.0),
+                vel_range=(0.0, 0.0),
+                interval_range=(3.0, 6.0),
             ),
         ]
 
@@ -1134,6 +1149,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
+            # StandingReward(scale=0.1), # this works, but makes it very bad at disturbance rejection.
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.05, error_scale=0.02),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
