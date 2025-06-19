@@ -6,6 +6,7 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import ksim
+import xax
 from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
@@ -13,116 +14,48 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 6
+NUM_COMMANDS_MODEL = 7
 
 
-def euler_to_quat(euler_3: Array) -> Array:
-    """Converts roll, pitch, yaw angles to a quaternion (w, x, y, z).
+def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
+    """Rotates one quaternion by another quaternion through quaternion multiplication.
 
-    Args:
-        euler_3: The roll, pitch, yaw angles, shape (*, 3).
-
-    Returns:
-        The quaternion with shape (*, 4).
-    """
-    # Extract roll, pitch, yaw from input
-    roll, pitch, yaw = jnp.split(euler_3, 3, axis=-1)
-
-    # Calculate trigonometric functions for each angle
-    cr = jnp.cos(roll * 0.5)
-    sr = jnp.sin(roll * 0.5)
-    cp = jnp.cos(pitch * 0.5)
-    sp = jnp.sin(pitch * 0.5)
-    cy = jnp.cos(yaw * 0.5)
-    sy = jnp.sin(yaw * 0.5)
-
-    # Calculate quaternion components using the conversion formula
-    w = cr * cp * cy + sr * sp * sy
-    x = sr * cp * cy - cr * sp * sy
-    y = cr * sp * cy + sr * cp * sy
-    z = cr * cp * sy - sr * sp * cy
-
-    # Combine into quaternion [w, x, y, z]
-    quat = jnp.concatenate([w, x, y, z], axis=-1)
-
-    # Normalize the quaternion
-    quat = quat / jnp.linalg.norm(quat, axis=-1, keepdims=True)
-
-    return quat
-
-
-def rotate_quat(q1: Array, q2: Array) -> Array:
-    """Rotate quaternion q1 by quaternion q2.
+    This performs the operation: rotating_quat * quat_to_rotate * rotating_quat^(-1) if inverse=False
+    or rotating_quat^(-1) * quat_to_rotate * rotating_quat if inverse=True
 
     Args:
-        q1: quaternion to be rotated [w, x, y, z]
-        q2: quaternion to rotate by [w, x, y, z]
+        quat_to_rotate: The quaternion being rotated (w,x,y,z), shape (*, 4)
+        rotating_quat: The quaternion performing the rotation (w,x,y,z), shape (*, 4)
+        inverse: If True, rotate by the inverse of rotating_quat
+        eps: Small epsilon value to avoid division by zero in normalization
 
     Returns:
-        rotated quaternion [w, x, y, z]
+        The rotated quaternion (w,x,y,z), shape (*, 4)
     """
-    w1, x1, y1, z1 = q1
-    w2, x2, y2, z2 = q2
+    # Normalize both quaternions
+    quat_to_rotate = quat_to_rotate / (jnp.linalg.norm(quat_to_rotate, axis=-1, keepdims=True) + eps)
+    rotating_quat = rotating_quat / (jnp.linalg.norm(rotating_quat, axis=-1, keepdims=True) + eps)
 
-    return jnp.array(
-        [
-            w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,  # w
-            w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,  # x
-            w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,  # y
-            w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,  # z
-        ]
-    )
+    # If inverse requested, conjugate the rotating quaternion (negate x,y,z components)
+    if inverse:
+        w_part = rotating_quat[..., :1]  # w component
+        xyz_part = -rotating_quat[..., 1:]  # negate x,y,z components
+        rotating_quat = jnp.concatenate([w_part, xyz_part], axis=-1)
 
+    # Extract components of both quaternions
+    w1, x1, y1, z1 = jnp.split(rotating_quat, 4, axis=-1)  # rotating quaternion
+    w2, x2, y2, z2 = jnp.split(quat_to_rotate, 4, axis=-1)  # quaternion being rotated
 
-def rotate_quat_inverse(q1: Array, q2: Array) -> Array:
-    """Rotate quaternion q1 by quaternion q2.
+    # Quaternion multiplication formula
+    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
+    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
+    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
+    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
 
-    Args:
-        q1: quaternion to be rotated [w, x, y, z]
-        q2: quaternion to rotate by [w, x, y, z]
+    result = jnp.concatenate([w, x, y, z], axis=-1)
 
-    Returns:
-        rotated quaternion [w, x, y, z]
-    """
-    q2_conj = jnp.array([q2[0], -q2[1], -q2[2], -q2[3]])
-
-    return rotate_quat(q1, q2_conj)
-
-
-def quat_to_euler(quat_4: Array, eps: float = 1e-6) -> Array:
-    """Normalizes and converts a quaternion (w, x, y, z) to roll, pitch, yaw.
-
-    Args:
-        quat_4: The quaternion to convert, shape (*, 4).
-        eps: A small epsilon value to avoid division by zero.
-
-    Returns:
-        The roll, pitch, yaw angles with shape (*, 3).
-    """
-    quat_4 = quat_4 / (jnp.linalg.norm(quat_4, axis=-1, keepdims=True) + eps)
-    w, x, y, z = jnp.split(quat_4, 4, axis=-1)
-
-    # Roll (x-axis rotation)
-    sinr_cosp = 2.0 * (w * x + y * z)
-    cosr_cosp = 1.0 - 2.0 * (x * x + y * y)
-    roll = jnp.arctan2(sinr_cosp, cosr_cosp)
-
-    # Pitch (y-axis rotation)
-    sinp = 2.0 * (w * y - z * x)
-
-    # Handle edge cases where |sinp| >= 1
-    pitch = jnp.where(
-        jnp.abs(sinp) >= 1.0,
-        jnp.sign(sinp) * jnp.pi / 2.0,  # Use 90 degrees if out of range
-        jnp.arcsin(sinp),
-    )
-
-    # Yaw (z-axis rotation)
-    siny_cosp = 2.0 * (w * z + x * y)
-    cosy_cosp = 1.0 - 2.0 * (y * y + z * z)
-    yaw = jnp.arctan2(siny_cosp, cosy_cosp)
-
-    return jnp.concatenate([roll, pitch, yaw], axis=-1)
+    # Normalize result
+    return result / (jnp.linalg.norm(result, axis=-1, keepdims=True) + eps)
 
 
 def main() -> None:
@@ -143,7 +76,6 @@ def main() -> None:
 
     # Constant values.
     carry_shape = (task.config.depth, task.config.hidden_size)  # (3, 128) hiddens
-    # num_joints = len(joint_names)  # 20, joints outputs
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
@@ -160,33 +92,41 @@ def main() -> None:
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        quaternion: Array,
+        quaternion: Array,  # imu quat
         initial_heading: Array,
         command: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        heading_yaw_cmd = command[2]  # yaw_heading is at index 2
+        cmd_vel = command[..., :2]
+        cmd_yaw_rate = command[..., 2:3]
+        cmd_heading = command[..., 3:4]
+        cmd_body_height = command[..., 4:5]
+        cmd_body_orientation = command[..., 5:7]
 
-        initial_heading_quat = euler_to_quat(jnp.array([0.0, 0.0, initial_heading.squeeze()]))
+        initial_heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, initial_heading.squeeze()]))
+        relative_quaternion = rotate_quat_by_quat(quaternion, initial_heading_quat, inverse=True)
 
-        base_yaw_quat = rotate_quat_inverse(initial_heading_quat, quaternion)
+        heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, cmd_heading.squeeze()]))
+        backspun_quat = rotate_quat_by_quat(relative_quaternion, heading_quat, inverse=True)
 
-        # Create quaternion from heading command
-        heading_yaw_cmd_quat = euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
+        positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
-        backspun_imu_quat = rotate_quat_inverse(base_yaw_quat, heading_yaw_cmd_quat)
-
-        obs = [
-            joint_angles,  # NUM_JOINTS (20)
-            joint_angular_velocities,  # NUM_JOINTS (20)
-            backspun_imu_quat,  # 4 (backspun IMU quaternion)
-            command,  # 6: [vx, vy, yaw_heading, bh, rx, ry]
-            gyroscope,  # 3 (IMU gyroscope data)
-        ]
-
-        obs_n = jnp.concatenate(obs, axis=-1)
-        dist, carry = model.actor.forward(obs_n, carry)
+        obs = jnp.concatenate(
+            [
+                joint_angles,
+                joint_angular_velocities,
+                positive_backspun_quat,
+                cmd_vel,
+                cmd_yaw_rate,
+                jnp.zeros_like(cmd_heading),  # during training this is masked out
+                jnp.zeros_like(cmd_body_height),
+                cmd_body_orientation,
+                gyroscope,
+            ],
+            axis=-1,
+        )
+        dist, carry = model.actor.forward(obs, carry)
         return dist.mode(), carry
 
     init_onnx = export_fn(
