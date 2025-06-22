@@ -1208,6 +1208,23 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ),
             # Copy from bart
             # cmd
+            # LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
+            # AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
+            # XYOrientationReward(scale=0.2, error_scale=0.03),
+            # BaseHeightReward(scale=0.1, error_scale=0.05, standard_height=0.98),
+            # # shaping
+            # # SimpleSingleFootContactReward(scale=0.15),
+            # SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
+            # FeetAirtimeReward(scale=2.2, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            # FeetOrientationReward(scale=0.1, error_scale=0.25),
+            # BentArmPenalty.create_penalty(physics_model, scale=-0.2),
+            # ksim.AngularVelocityPenalty(index=("x", "y"),scale=-0.05, scale_by_curriculum=True),
+            # # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
+            # # sim2real
+            # ksim.ActionVelocityPenalty(scale=-0.05, norm="l1", scale_by_curriculum=True),
+            # # ksim.CtrlPenalty(scale=-0.00001),
+            # Copy from bart jun 11
+            # cmd
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.1),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.2, error_scale=0.03),
@@ -1215,13 +1232,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.15, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
-            FeetAirtimeReward(scale=2.2, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward(scale=0.1, error_scale=0.25),
             BentArmPenalty.create_penalty(physics_model, scale=-0.2),
-            ksim.AngularVelocityPenalty(index=("x", "y"),scale=-0.05, scale_by_curriculum=True),
             # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
             # sim2real
-            ksim.ActionVelocityPenalty(scale=-0.05, norm="l1", scale_by_curriculum=True),
+            ksim.ActionVelocityPenalty(scale=-0.05, scale_by_curriculum=True),
             # ksim.CtrlPenalty(scale=-0.00001),
         ]
 
