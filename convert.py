@@ -193,11 +193,13 @@ def main() -> None:
         backspun_quat = rotate_quat_by_quat(relative_quaternion, heading_yaw_cmd_quat, inverse=True)
         positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
+        imu_orientation_6 = xax.rotation_matrix_to_rotation6d(xax.quat_to_rotmat(positive_backspun_quat))
+
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
-                positive_backspun_quat,
+                imu_orientation_6,
                 command[..., :6],
                 cmd_val,  # Current animation frame joint angles
                 gyroscope,
