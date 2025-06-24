@@ -142,9 +142,9 @@ class SimpleSingleFootContactReward(ksim.Reward):
     scale: float = 1.0
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
-        single = jnp.logical_xor(left_contact, right_contact).squeeze()
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        single = jnp.logical_xor(left_contact, right_contact)
 
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, single)
@@ -166,8 +166,8 @@ class SingleFootContactReward(ksim.StatefulReward):
         return jnp.array([0.0])
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
         single = jnp.logical_xor(left_contact, right_contact)
 
         def _body(time_since_single_contact: Array, is_single_contact: Array) -> tuple[Array, Array]:
@@ -177,7 +177,7 @@ class SingleFootContactReward(ksim.StatefulReward):
         carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, single)
         single_contact_grace = time_since_single_contact < self.grace_period
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 1.0, single_contact_grace.squeeze())
+        reward = jnp.where(is_zero_cmd, 1.0, single_contact_grace[:, 0])
         return reward, carry
 
 
@@ -187,9 +187,9 @@ class StandingReward(ksim.Reward):
     scale: float = 1.0
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False).squeeze()
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False).squeeze()
-        double = jnp.logical_and(left_contact, right_contact).squeeze()
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        double = jnp.logical_and(left_contact, right_contact)
 
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, double, 0.0)
@@ -578,15 +578,25 @@ class ImuOrientationObservation(ksim.StatefulObservation):
             ),
         ),
     )
+    bias_euler: tuple[float, float, float] = attrs.field(
+        default=(0.0, 0.0, 0.0),
+        validator=attrs.validators.deep_iterable(
+            attrs.validators.and_(
+                attrs.validators.ge(0.0),
+                attrs.validators.le(math.pi),
+            ),
+        ),
+    )
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: ksim.PhysicsModel,
+        noise: float = 0.0,
         framequat_name: str,
         lag_range: tuple[float, float] = (0.01, 0.1),
-        noise: float = 0.0,
+        bias_euler: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> Self:
         """Create a IMU orientation observation from a physics model.
 
@@ -605,12 +615,19 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         return cls(
             framequat_idx_range=sensor_name_to_idx_range[framequat_name],
             lag_range=lag_range,
+            bias_euler=bias_euler,
             noise=noise,
         )
 
-    def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
         minval, maxval = self.lag_range
-        return jnp.zeros((4,)), jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        lag = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+
+        bias_range = jnp.array(self.bias_euler)
+        bias = jax.random.uniform(rng, (3,), minval=-bias_range, maxval=bias_range)
+        bias_quat = xax.euler_to_quat(bias)
+
+        return jnp.zeros((4,)), lag, bias_quat
 
     def observe_stateful(
         self,
@@ -618,12 +635,13 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         curriculum_level: Array,
         rng: PRNGKeyArray,
     ) -> tuple[Array, tuple[Array, Array]]:
+        x, lag, bias = state.obs_carry
+
         framequat_start, framequat_end = self.framequat_idx_range
         framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
 
-        # Add noise
-        # # BUG? noise is added twice? also in ksim rl.py
-        # framequat_data = add_noise(framequat_data, rng, "gaussian", self.noise, curriculum_level)
+        # apply bias noise
+        framequat_data = rotate_quat_by_quat(framequat_data, bias)
 
         # get heading cmd
         heading_yaw_cmd = state.commands["unified_command"][3]
@@ -635,10 +653,9 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
 
         # Get current Kalman filter state
-        x, lag = state.obs_carry
         x = x * lag + backspun_framequat * (1 - lag)
 
-        return x, (x, lag)
+        return x, (x, lag, bias)
 
 
 @attrs.define(kw_only=True)
@@ -1118,6 +1135,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
+                bias_euler=(0.1, 0.1, 0.0), # roll, pitch, yaw
                 noise=math.radians(1),
             ),
         ]
