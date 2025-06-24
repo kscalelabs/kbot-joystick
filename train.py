@@ -598,7 +598,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         lag_range: tuple[float, float] = (0.01, 0.1),
         bias_euler: tuple[float, float, float] = (0.0, 0.0, 0.0),
     ) -> Self:
-        """Create a IMU orientation observation from a physics model.
+        """Create an IMU orientation observation from a physics model.
 
         Args:
             physics_model: MuJoCo physics model
@@ -621,11 +621,12 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         )
 
     def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
+        lrng, brng = jax.random.split(rng, 2)
         minval, maxval = self.lag_range
-        lag = jax.random.uniform(rng, (1,), minval=minval, maxval=maxval)
+        lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
 
         bias_range = jnp.array(self.bias_euler)
-        bias = jax.random.uniform(rng, (3,), minval=-bias_range, maxval=bias_range)
+        bias = jax.random.uniform(brng, (3,), minval=-bias_range, maxval=bias_range)
         bias_quat = xax.euler_to_quat(bias)
 
         return jnp.zeros((4,)), lag, bias_quat
