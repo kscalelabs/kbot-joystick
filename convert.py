@@ -120,7 +120,7 @@ def main() -> None:
                 cmd_vel,
                 cmd_yaw_rate,
                 jnp.zeros_like(cmd_heading),  # during training this is masked out
-                jnp.zeros_like(cmd_body_height),
+                cmd_body_height,
                 cmd_body_orientation,
                 gyroscope,
             ],
