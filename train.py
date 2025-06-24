@@ -66,7 +66,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_acc_gyro: bool = xax.field(
+    use_gyro: bool = xax.field(
         value=True,
         help="Whether to use the IMU acceleration and gyroscope observations.",
     )
@@ -1207,7 +1207,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             num_joints * 2  # joint pos and vel
             + 4  # imu quat
             + num_commands
-            + (3 if self.config.use_acc_gyro else 0)  # imu_gyro
+            + (3 if self.config.use_gyro else 0)  # imu_gyro
         )
 
         num_critic_inputs = (
@@ -1261,7 +1261,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             jnp.zeros_like(cmd[..., 3:4]),
             cmd[..., 4:],
         ]
-        if self.config.use_acc_gyro:
+        if self.config.use_gyro:
             obs += [
                 imu_gyro_3,  # 3
             ]
