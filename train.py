@@ -33,7 +33,7 @@ ZEROS: list[tuple[str, float, float]] = [
     ("dof_left_elbow_02", math.radians(-90.0), 1.0),
     ("dof_left_wrist_00", 0.0, 1.0),
     ("dof_right_hip_pitch_04", math.radians(-20.0), 0.01),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
+    ("dof_right_hip_roll_03", math.radians(-0.0), 2.0),
     ("dof_right_hip_yaw_03", 0.0, 2.0),
     ("dof_right_knee_04", math.radians(-50.0), 0.01),
     ("dof_right_ankle_02", math.radians(30.0), 1.0),
