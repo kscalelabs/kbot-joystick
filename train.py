@@ -1137,7 +1137,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
                 lag_range=(0.0, 0.1),
-                bias_euler=(0.1, 0.1, 0.0),  # roll, pitch, yaw
+                bias_euler=(0.05, 0.05, 0.0),  # roll, pitch, yaw
                 noise=math.radians(1),
             ),
         ]
