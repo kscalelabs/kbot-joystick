@@ -1223,8 +1223,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.05),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.1, error_scale=0.01),
-            # BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98), # only works on scene 'smooth'
-            HfieldBaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.92),
+            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98), # only works on scene 'smooth'
+            # HfieldBaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.92),
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
@@ -1239,15 +1239,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
             #testing::
-            FeetPositionReward.create(
-                physics_model=physics_model, 
-                base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT", 
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT", 
-                scale=0.01, 
-                error_scale=0.1, 
-                stance_width=0.30
-            ),
+            # FeetPositionReward.create(
+            #     physics_model=physics_model, 
+            #     base_body_name="base",
+            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT", 
+            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT", 
+            #     scale=0.01, 
+            #     error_scale=0.1, 
+            #     stance_width=0.30
+            # ),
             # sim2real
             ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
