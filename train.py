@@ -593,11 +593,11 @@ class FeetPositionObservation(ksim.Observation):
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         # get global positions
-        base_pos, base_mat = ksim.get_body_pose(state.physics_state.data, self.base_idx)
-        left_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_left_idx)[0]
-        right_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_right_idx)[0]
+        base_pos = state.physics_state.data.xpos[self.base_idx]
+        left_foot_pos = state.physics_state.data.xpos[self.foot_left_idx]
+        right_foot_pos = state.physics_state.data.xpos[self.foot_right_idx]
 
-        base_yaw = xax.quat_to_euler(state.physics_state.data.xquat[:, 1, :])[:, 2]
+        base_yaw = xax.quat_to_euler(state.physics_state.data.xquat[self.base_idx, :])[2]
         base_yaw_quat = xax.euler_to_quat(jnp.stack([jnp.zeros_like(base_yaw), jnp.zeros_like(base_yaw), base_yaw], axis=-1))
 
         # transform feet pos to base frame
