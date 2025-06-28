@@ -433,7 +433,6 @@ class BaseHeightReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_height = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
-        print("bh:current height", current_height)
 
         height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
@@ -454,7 +453,6 @@ class HfieldBaseHeightReward(ksim.Reward):
         base_z = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
 
         current_height = base_z - lowest_foot_z
-        print("hfbh:current height", current_height)
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
 
         height_error = jnp.abs(current_height - commanded_height)
