@@ -97,7 +97,7 @@ keras==3.9.2
 kiwisolver==1.4.8
 kmv==0.3.14
 kscale==0.3.16
--e git+https://github.com/b-vm/ksim@0f046410fb0ad2eee0c9836227b0bb6d1eaee000#egg=ksim
+-e git+https://github.com/b-vm/ksim@60062983f343fac09545fe4ebf866d4f73ec07f9#egg=ksim
 libclang==18.1.1
 Markdown==3.8
 markdown-it-py==3.0.0
@@ -112,7 +112,7 @@ mpmath==1.3.0
 msgpack==1.1.0
 mujoco==3.3.2
 mujoco-mjx==3.3.2
-mujoco-scenes==0.0.14
+-e git+https://github.com/b-vm/mujoco-scenes@54202d71bb0e9f778ddf0ed1f06adc6ad9e3e28f#egg=mujoco_scenes
 multidict==6.4.3
 namex==0.0.9
 nbclient==0.10.2
