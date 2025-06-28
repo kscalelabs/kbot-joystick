@@ -597,11 +597,14 @@ class FeetPositionObservation(ksim.Observation):
         left_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_left_idx)[0]
         right_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_right_idx)[0]
 
+        base_yaw = xax.quat_to_euler(state.physics_state.data.xquat[:, 1, :])[:, 2]
+        base_yaw_quat = xax.euler_to_quat(jnp.stack([jnp.zeros_like(base_yaw), jnp.zeros_like(base_yaw), base_yaw], axis=-1))
+
         # transform feet pos to base frame
         relative_left_foot_pos = left_foot_pos - base_pos
         relative_right_foot_pos = right_foot_pos - base_pos
-        fl_ndarray = base_mat.T @ relative_left_foot_pos
-        fr_ndarray = base_mat.T @ relative_right_foot_pos
+        fl_ndarray = xax.rotate_vector_by_quat(relative_left_foot_pos, base_yaw_quat, inverse=True)
+        fr_ndarray = xax.rotate_vector_by_quat(relative_right_foot_pos, base_yaw_quat, inverse=True)
 
         return jnp.concatenate([fl_ndarray, fr_ndarray], axis=-1)
 
@@ -1495,6 +1498,7 @@ if __name__ == "__main__":
             global_grad_clip=2.0,
             entropy_coef=0.004,
             gamma=0.9,
+            lam=0.94,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
