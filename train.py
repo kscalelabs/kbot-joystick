@@ -433,10 +433,31 @@ class BaseHeightReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         current_height = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
+        print("bh:current height", current_height)
 
         height_error = jnp.abs(current_height - commanded_height)
-        # is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        # height_error = jnp.where(is_zero_cmd, height_error, height_error**2)  # smooth kernel for walking.
+        return jnp.exp(-height_error / self.error_scale)
+    
+
+@attrs.define(frozen=True)
+class HfieldBaseHeightReward(ksim.Reward):
+    """Reward for keeping a set distance between the base and the lowest foot. Compatible with hfield scenes, where floor height is variable"""
+
+    error_scale: float = attrs.field(default=0.25)
+    standard_height: float = attrs.field(default=0.9)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        left_foot_z = trajectory.xpos[:, 23, 2]
+        right_foot_z = trajectory.xpos[:, 18, 2]
+        lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
+
+        base_z = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
+
+        current_height = base_z - lowest_foot_z
+        print("hfbh:current height", current_height)
+        commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
+
+        height_error = jnp.abs(current_height - commanded_height)
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -446,19 +467,46 @@ class FeetPositionReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.25)
     stance_width: float = attrs.field(default=0.3)
+    base_idx: int = attrs.field(default=1)
+    foot_left_idx: int = attrs.field(default=0)
+    foot_right_idx: int = attrs.field(default=0)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        base_body_name: str,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        scale: float,
+        error_scale: float,
+        stance_width: float,
+    ) -> Self:
+        base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
+        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(base_idx=base, foot_left_idx=fl, foot_right_idx=fr, scale=scale, error_scale=error_scale, stance_width=stance_width)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        feet_pos = trajectory.obs["feet_position_observation"]
-        left_foot_pos = feet_pos[:, :3]
-        right_foot_pos = feet_pos[:, 3:]
+        # get global positions
+        left_foot_pos = trajectory.xpos[:, self.foot_left_idx]
+        right_foot_pos = trajectory.xpos[:, self.foot_right_idx]
+        base_pos = trajectory.xpos[:, self.base_idx]
 
-        # Calculate stance errors
-        stance_x_error = jnp.abs(left_foot_pos[:, 0] - right_foot_pos[:, 0])
-        stance_y_error = jnp.abs(jnp.abs(left_foot_pos[:, 1] - right_foot_pos[:, 1]) - self.stance_width)
+        # compute feet pos in base frame
+        relative_left_foot_pos = left_foot_pos - base_pos
+        relative_right_foot_pos = right_foot_pos - base_pos
+        left_foot_pos_in_base_frame = xax.rotate_vector_by_quat(relative_left_foot_pos, trajectory.xquat[:, self.base_idx, :], inverse=True)
+        right_foot_pos_in_base_frame = xax.rotate_vector_by_quat(relative_right_foot_pos, trajectory.xquat[:, self.base_idx, :], inverse=True)
+
+        # calculate stance errors
+        stance_x_error = jnp.abs(left_foot_pos_in_base_frame[:, 0] - right_foot_pos_in_base_frame[:, 0])
+        stance_y_error = jnp.abs(jnp.abs(left_foot_pos_in_base_frame[:, 1] - right_foot_pos_in_base_frame[:, 1]) - self.stance_width)
         stance_error = stance_x_error + stance_y_error
         reward = jnp.exp(-stance_error / self.error_scale)
 
-        # standing?
+        # only apply reward for standing
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(zero_cmd_mask, reward, 0.0)
         return reward
@@ -470,6 +518,22 @@ class FeetOrientationReward(ksim.Reward):
 
     scale: float = attrs.field(default=1.0)
     error_scale: float = attrs.field(default=0.25)
+    foot_left_idx: int = attrs.field(default=0)
+    foot_right_idx: int = attrs.field(default=0)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        scale: float,
+        error_scale: float,
+    ) -> Self:
+        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(foot_left_idx=fl, foot_right_idx=fr, scale=scale, error_scale=error_scale)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # compute error for standing
@@ -483,13 +547,13 @@ class FeetOrientationReward(ksim.Reward):
         )
         straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
 
-        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 23, :], axis=-1) ** 2
-        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, 18, :], axis=-1) ** 2
+        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_left_idx, :], axis=-1) ** 2
+        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_right_idx, :], axis=-1) ** 2
         standing_error = left_quat_error + right_quat_error
 
         # compute error for walking
-        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 23, :])
-        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, 18, :])
+        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_left_idx, :])
+        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_right_idx, :])
 
         # for walking, mask out yaw
         left_foot_quat = xax.euler_to_quat(left_foot_euler.at[:, 2].set(0.0))
@@ -511,40 +575,37 @@ class FeetOrientationReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
+    base_idx: int
     foot_left_idx: int
     foot_right_idx: int
-    floor_threshold: float = 0.0
-    in_robot_frame: bool = True
 
     @classmethod
     def create(
         cls,
         *,
         physics_model: ksim.PhysicsModel,
-        foot_left_site_name: str,
-        foot_right_site_name: str,
-        floor_threshold: float = 0.0,
-        in_robot_frame: bool = True,
+        base_body_name: str,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
     ) -> Self:
-        fl = ksim.get_site_data_idx_from_name(physics_model, foot_left_site_name)
-        fr = ksim.get_site_data_idx_from_name(physics_model, foot_right_site_name)
-        return cls(foot_left_idx=fl, foot_right_idx=fr, floor_threshold=floor_threshold, in_robot_frame=in_robot_frame)
+        base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
+        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(base_idx=base, foot_left_idx=fl, foot_right_idx=fr)
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        fl_ndarray = ksim.get_site_pose(state.physics_state.data, self.foot_left_idx)[0] + jnp.array(
-            [0.0, 0.0, self.floor_threshold]
-        )
-        fr_ndarray = ksim.get_site_pose(state.physics_state.data, self.foot_right_idx)[0] + jnp.array(
-            [0.0, 0.0, self.floor_threshold]
-        )
+        # get global positions
+        base_pos, base_mat = ksim.get_body_pose(state.physics_state.data, self.base_idx)
+        left_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_left_idx)[0]
+        right_foot_pos = ksim.get_body_pose(state.physics_state.data, self.foot_right_idx)[0]
 
-        if self.in_robot_frame:
-            # Transform foot positions to robot frame
-            base_quat = state.physics_state.data.qpos[3:7]  # Base quaternion
-            fl = xax.rotate_vector_by_quat(jnp.array(fl_ndarray), base_quat, inverse=True)
-            fr = xax.rotate_vector_by_quat(jnp.array(fr_ndarray), base_quat, inverse=True)
+        # transform feet pos to base frame
+        relative_left_foot_pos = left_foot_pos - base_pos
+        relative_right_foot_pos = right_foot_pos - base_pos
+        fl_ndarray = base_mat.T @ relative_left_foot_pos
+        fr_ndarray = base_mat.T @ relative_right_foot_pos
 
-        return jnp.concatenate([fl, fr], axis=-1)
+        return jnp.concatenate([fl_ndarray, fr_ndarray], axis=-1)
 
 
 @attrs.define(frozen=True)
@@ -1127,10 +1188,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_angvel", noise=0.0),
             FeetPositionObservation.create(
                 physics_model=physics_model,
-                foot_left_site_name="left_foot",
-                foot_right_site_name="right_foot",
-                floor_threshold=0.0,
-                in_robot_frame=True,
+                base_body_name="base",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
             ),
             BaseHeightObservation(),
             ImuOrientationObservation.create(
@@ -1165,15 +1225,31 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.05),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.1, error_scale=0.01),
-            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),
+            # BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98), # only works on scene 'smooth'
+            HfieldBaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.92),
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             # StandingReward(scale=0.1), # this works, but makes it very bad at disturbance rejection.
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward(scale=0.05, error_scale=0.02),
+            FeetOrientationReward.create(
+                physics_model=physics_model,
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                scale=0.05, 
+                error_scale=0.02
+            ),
             ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
-            # FeetPositionReward(scale=0.1, error_scale=0.05, stance_width=0.3),
+            #testing::
+            FeetPositionReward.create(
+                physics_model=physics_model, 
+                base_body_name="base",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT", 
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT", 
+                scale=0.01, 
+                error_scale=0.1, 
+                stance_width=0.30
+            ),
             # sim2real
             ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
             # ksim.CtrlPenalty(scale=-0.00001),
