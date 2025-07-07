@@ -1335,7 +1335,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
             cmd[..., :3],
-            jnp.zeros_like(cmd[..., 3:4]),
+            jnp.zeros_like(cmd[..., 3:4]), # TODO just remove this
             cmd[..., 4:],
         ]
         if self.config.use_gyro:

@@ -75,18 +75,18 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    model_carry_shape = (task.config.depth, task.config.hidden_size)  # (3, 128) hiddens
+    carry_shape = (task.config.depth + 1, task.config.hidden_size) # +1 to hack in a tensor for heading carry
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
         num_commands=num_commands,
-        carry_size=model_carry_shape,
+        carry_size=carry_shape,
     )
 
     @jax.jit
     def init_fn() -> Array:
-        return (None, jnp.zeros(model_carry_shape)) # (heading, model_carry)
+        return jnp.zeros(carry_shape)
 
     @jax.jit
     def step_fn(
@@ -96,13 +96,15 @@ def main() -> None:
         # initial_heading: Array,
         command: Array,
         gyroscope: Array,
-        carry: tuple[None, Array],
-    ) -> tuple[Array, tuple[None, Array]]:
-        heading, model_carry = carry
-        
+        carry: Array,
+    ) -> tuple[Array, Array]:
+        heading = carry[0]
+        model_carry = carry[1:]
+
         # initialize heading if first step
-        if heading is None:
-            heading = xax.quat_to_euler(quaternion)[2]
+        if heading[1] == 0.0: # hack use 2nd element to record init
+            heading[0] = xax.quat_to_euler(quaternion)[2]
+            heading[1] = 1.0
 
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
@@ -133,8 +135,8 @@ def main() -> None:
             axis=-1,
         )
         dist, model_carry = model.actor.forward(obs, model_carry)
-        carry = (heading, model_carry)
-        return dist.mode(), carry
+        carry = jnp.concatenate([heading, model_carry], axis=-1)
+        return dist.mode()
 
     init_onnx = export_fn(
         model=init_fn,
