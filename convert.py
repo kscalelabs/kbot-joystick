@@ -93,18 +93,17 @@ def main() -> None:
         joint_angles: Array,
         joint_angular_velocities: Array,
         quaternion: Array,  # imu quat
-        # initial_heading: Array,
         command: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        heading = carry[0]
+        heading_carry = carry[0]
         model_carry = carry[1:]
 
-        # initialize heading if first step
-        if heading[1] == 0.0: # hack use 2nd element to record init
-            heading[0] = xax.quat_to_euler(quaternion)[2]
-            heading[1] = 1.0
+        # initialize heading if first step. use heading[1] == 1.0 to record if we have already initialized.
+        initial_heading = jnp.array([xax.quat_to_euler(quaternion)[2], 1.0])
+        heading_carry = heading_carry.at[0].set(jnp.where(heading_carry[1] == 0.0, initial_heading[0], heading_carry[0]))
+        heading_carry = heading_carry.at[1].set(jnp.where(heading_carry[1] == 0.0, initial_heading[1], heading_carry[1]))
 
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
@@ -112,9 +111,10 @@ def main() -> None:
         cmd_body_orientation = command[..., 5:7]
 
         # update heading based on yaw rate command
-        heading += cmd_yaw_rate * 0.02 # TODO hardcoding dt for now
+        heading = heading_carry[0] + cmd_yaw_rate * 0.02 # TODO hardcoding dt for now
+        heading_carry = heading_carry.at[0].set(heading.squeeze())
 
-        heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading]))
+        heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading.squeeze()]))
         backspun_quat = rotate_quat_by_quat(quaternion, heading_quat, inverse=True)
 
         # ensure positive w component
@@ -135,8 +135,8 @@ def main() -> None:
             axis=-1,
         )
         dist, model_carry = model.actor.forward(obs, model_carry)
-        carry = jnp.concatenate([heading, model_carry], axis=-1)
-        return dist.mode()
+        carry = jnp.concatenate([heading_carry[None, :], model_carry], axis=0)
+        return dist.mode(), carry
 
     init_onnx = export_fn(
         model=init_fn,
