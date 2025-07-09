@@ -328,8 +328,8 @@ class ActionVelocityReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         actions = trajectory.action
         actions_zp = jnp.pad(actions, ((1, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done[..., :-1], ((1, 0),), mode="edge")[..., None]
-        actions_vel = jnp.where(done, 0.0, actions_zp[..., 1:, :] - actions_zp[..., :-1, :])
+        done = jnp.pad(trajectory.done, (1, 0), mode="edge")[:-1][:, None]
+        actions_vel = jnp.where(done, 0.0, actions_zp[1:] - actions_zp[:-1])
         error = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         error = jnp.where(is_zero_cmd, error, error**2)
