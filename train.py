@@ -1275,8 +1275,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_commands = (
             2  # linear velocity command (vx, vy)
-            + 2  # angular velocity command (wz, yaw)
-            + 1  # base height command
+            + 1  # angular velocity command (wz)
+            + 1  # base height command (bh)
             + 2  # base xy orientation command (rx, ry)
         )
 
@@ -1335,7 +1335,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
             cmd[..., :3],
-            jnp.zeros_like(cmd[..., 3:4]), # TODO just remove this
+            # jnp.zeros_like(cmd[..., 3:4]), # TODO just remove this
             cmd[..., 4:],
         ]
         if self.config.use_gyro:
