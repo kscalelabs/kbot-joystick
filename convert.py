@@ -127,7 +127,7 @@ def main() -> None:
                 positive_backspun_quat,
                 cmd_vel,
                 cmd_yaw_rate,
-                jnp.zeros(1),  # TODO remove this from training
+                # jnp.zeros(1),  # TODO remove this from training
                 cmd_body_height,
                 cmd_body_orientation,
                 gyroscope,
