@@ -79,6 +79,18 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=1e-5,
         help="Weight decay for the Adam optimizer.",
     )
+    use_lr_decay: bool = xax.field(
+        value=False, 
+        help="Whether to use cosine learning rate decay",
+    )
+    lr_decay_steps: int = xax.field(
+        value=19_200_000, # 19.2mm is about 5k iters with current batching
+        help="Number of steps for cosine decay schedule",
+    )
+    lr_final_multiplier: float = xax.field(
+        value=0.01,
+        help="Final learning rate will be this * initial learning rate",
+    )
 
 
 # TODO put this in xax?
@@ -1103,11 +1115,32 @@ class Model(eqx.Module):
 
 class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_optimizer(self) -> optax.GradientTransformation:
-        return (
-            optax.adam(self.config.learning_rate)
-            if self.config.adam_weight_decay == 0.0
-            else optax.adamw(self.config.learning_rate, weight_decay=self.config.adam_weight_decay)
+        if not self.config.use_lr_decay:
+            # Use constant learning rate
+            if self.config.adam_weight_decay == 0.0:
+                return optax.adam(self.config.learning_rate)
+            else:
+                return optax.adamw(
+                    learning_rate=self.config.learning_rate, 
+                    weight_decay=self.config.adam_weight_decay
+                )
+        
+        # Use cosine decay
+        cosine_schedule = optax.cosine_decay_schedule(
+            init_value=self.config.learning_rate,
+            decay_steps=self.config.lr_decay_steps,
+            alpha=self.config.lr_final_multiplier
         )
+        
+        if self.config.adam_weight_decay == 0.0:
+            return optax.chain(
+                optax.scale_by_adam(),
+                optax.scale_by_schedule(cosine_schedule)
+            )
+        else:
+            return optax.chain(
+                optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay)
+            )
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
