@@ -1414,7 +1414,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_vel_n / 10.0,  # TODO fix this
                 imu_quat_4,
                 cmd[..., :3],
-                jnp.zeros_like(cmd[..., 3:4]),
+                # jnp.zeros_like(cmd[..., 3:4]),
                 cmd[..., 4:],
                 imu_gyro_3,  # rad/s
                 # privileged obs:
