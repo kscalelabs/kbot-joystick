@@ -193,20 +193,6 @@ class SingleFootContactReward(ksim.StatefulReward):
         return reward, carry
 
 
-class StandingReward(ksim.Reward):
-    """Reward for having both feet in contact with the ground."""
-
-    scale: float = 1.0
-
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
-        double = jnp.logical_and(left_contact, right_contact)
-
-        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, double, 0.0)
-        return reward
-
 
 @attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.StatefulReward):
@@ -1242,10 +1228,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 2.0),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-0.5, 0.5),  # rad/s
-                # bh_range=(-0.05, 0.05), # m
-                bh_range=(0.0, 0.0),  # m # disabled for now, does not work on this robot. reward conflicts
+                bh_range=(0.0, 0.0),  # m 
                 bh_standing_range=(-0.2, 0.0),  # m
-                # bh_standing_range=(0.0, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 ctrl_dt=self.config.ctrl_dt,
@@ -1264,7 +1248,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
-            # StandingReward(scale=0.1), # this works, but makes it very bad at disturbance rejection.
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward.create(
                 physics_model=physics_model,
