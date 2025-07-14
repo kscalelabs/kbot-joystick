@@ -14,7 +14,7 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 7 # TODO
+NUM_COMMANDS_MODEL = 6
 
 
 def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
