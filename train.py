@@ -1350,9 +1350,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
-            cmd[..., :3],
-            # jnp.zeros_like(cmd[..., 3:4]), # TODO just remove this
-            cmd[..., 4:],
+            cmd[..., :3], # dropheading carry
+            cmd[..., 4:], 
         ]
         if self.config.use_gyro:
             obs += [
@@ -1396,8 +1395,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_pos_n,
                 joint_vel_n / 10.0,  # TODO fix this
                 imu_quat_4,
-                cmd[..., :3],
-                # jnp.zeros_like(cmd[..., 3:4]),
+                cmd[..., :3], # drop heading carry
                 cmd[..., 4:],
                 imu_gyro_3,  # rad/s
                 # privileged obs:
