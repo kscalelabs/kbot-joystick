@@ -1527,5 +1527,7 @@ if __name__ == "__main__":
             max_values_per_plot=50,
             # Checkpointing parameters.
             save_every_n_seconds=60,
+            valid_every_n_steps=100,
+            valid_every_n_seconds=None,
         ),
     )
