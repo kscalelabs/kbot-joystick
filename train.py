@@ -1506,7 +1506,7 @@ if __name__ == "__main__":
             # Training parameters.
             num_envs=8192,
             batch_size=512,
-            num_passes=4,
+            num_passes=3,
             epochs_per_log_step=1,
             rollout_length_seconds=1.2,
             global_grad_clip=2.0,
