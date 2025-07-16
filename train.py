@@ -339,17 +339,12 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    linvel_obs_name: str = attrs.field(default="sensor_observation_base_site_linvel")
     command_name: str = attrs.field(default="unified_command")
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # need to get lin vel obs from sensor, because xvel is not available in Trajectory.
-        if self.linvel_obs_name not in trajectory.obs:
-            raise ValueError(f"Observation {self.linvel_obs_name} not found; add it as an observation in your task.")
-
         # Get global frame velocities
-        global_vel = trajectory.obs[self.linvel_obs_name]
+        global_vel = trajectory.qvel[:, :3]
 
         # get base quat, only yaw.
         # careful to only rotate in z, disregard rx and ry, bad conflict with roll and pitch.
