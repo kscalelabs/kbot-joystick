@@ -97,7 +97,7 @@ keras==3.9.2
 kiwisolver==1.4.8
 kmv==0.3.14
 kscale==0.3.16
--e git+https://github.com/b-vm/ksim@2a1be641d0467eecf3bd74c2d9d5653beb65defa#egg=ksim
+-e git+https://github.com/b-vm/ksim@e86f7050f380e8f3e576128e4c87109bf2ee58bc#egg=ksim
 libclang==18.1.1
 Markdown==3.8
 markdown-it-py==3.0.0
