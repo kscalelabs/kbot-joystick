@@ -75,7 +75,7 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth + 1, task.config.hidden_size) # +1 to hack in a tensor for heading carry
+    carry_shape = (task.config.depth + 1, task.config.hidden_size)  # +1 to hack in a tensor for heading carry
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
@@ -102,8 +102,12 @@ def main() -> None:
 
         # initialize heading if first step. use heading[1] == 1.0 to record if we have already initialized.
         initial_heading = jnp.array([xax.quat_to_euler(quaternion)[2], 1.0])
-        heading_carry = heading_carry.at[0].set(jnp.where(heading_carry[1] == 0.0, initial_heading[0], heading_carry[0]))
-        heading_carry = heading_carry.at[1].set(jnp.where(heading_carry[1] == 0.0, initial_heading[1], heading_carry[1]))
+        heading_carry = heading_carry.at[0].set(
+            jnp.where(heading_carry[1] == 0.0, initial_heading[0], heading_carry[0])
+        )
+        heading_carry = heading_carry.at[1].set(
+            jnp.where(heading_carry[1] == 0.0, initial_heading[1], heading_carry[1])
+        )
 
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
@@ -111,7 +115,7 @@ def main() -> None:
         cmd_body_orientation = command[..., 4:6]
 
         # update heading based on yaw rate command
-        heading = heading_carry[0] + cmd_yaw_rate * 0.02 # TODO hardcoding dt for now
+        heading = heading_carry[0] + cmd_yaw_rate * 0.02  # TODO hardcoding dt for now
         heading_carry = heading_carry.at[0].set(heading.squeeze())
 
         heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading.squeeze()]))
