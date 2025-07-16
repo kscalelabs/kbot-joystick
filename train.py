@@ -1504,13 +1504,14 @@ if __name__ == "__main__":
     HumanoidWalkingTask.launch(
         HumanoidWalkingTaskConfig(
             # Training parameters.
-            num_envs=8192,
+            num_envs=4096,
             batch_size=512,
             num_passes=3,
             epochs_per_log_step=1,
-            rollout_length_seconds=1.2,
+            rollout_length_seconds=2.0,
             global_grad_clip=2.0,
             entropy_coef=0.004,
+            learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
             # Simulation parameters.
