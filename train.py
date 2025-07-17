@@ -165,14 +165,17 @@ class SingleFootContactReward(ksim.StatefulReward):
         left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
         right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
         single = jnp.logical_xor(left_contact, right_contact)
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
 
-        def _body(time_since_single_contact: Array, is_single_contact: Array) -> tuple[Array, Array]:
+        def _body(time_since_single_contact: Array, inputs: tuple[Array, Array]) -> tuple[Array, Array]:
+            is_single_contact, is_zero = inputs
             new_time = jnp.where(is_single_contact, 0.0, time_since_single_contact + self.ctrl_dt)
+            # if zero cmd, then max out time to reset grace period.
+            new_time = jnp.where(is_zero, self.grace_period, new_time)
             return new_time, new_time
 
-        carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, single)
+        carry, time_since_single_contact = jax.lax.scan(_body, reward_carry, (single, is_zero_cmd))
         single_contact_grace = time_since_single_contact < self.grace_period
-        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 1.0, single_contact_grace[:, 0])
         return reward, carry
 
@@ -1228,7 +1231,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),  # only works on scene 'smooth'
             # HfieldBaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.92),
             # shaping
-            # SimpleSingleFootContactReward(scale=0.15),
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward.create(
