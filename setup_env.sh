@@ -17,7 +17,8 @@ pip install -r requirements.txt
 sudo apt-get install -y xvfb
 
 # Install dependencies for mujoco   
-sudo apt-get update && sudo apt-get install -y libosmesa6-dev libgl1-mesa-glx libglfw3 libglew-dev libegl1-mesa-dev
+sudo apt-get update && sudo apt-get install -y libosmesa6-dev libgl1-mesa-glx libglfw3 libglew-dev libegl1-mesa-dev awscli
+
 
 echo "Environment setup complete! To activate the environment, run:"
 echo "conda activate ksim"

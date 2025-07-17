@@ -11,20 +11,6 @@ fi
 NUM_GPUS=$1
 SWEEP_ID=$2
 
-# Create logs directory if it doesn't exist
-mkdir -p logs
-
-# Activate conda environment
-eval "$($HOME/miniconda/bin/conda shell.bash hook)"
-conda activate ksim
-
-# Prevent JAX from grabbing all GPUs in the config generation step
-export CUDA_VISIBLE_DEVICES=""
-export XLA_PYTHON_CLIENT_PREALLOCATE="false"
-
-# First generate all configs
-python create_sweep.py
-
 # Set up S3 sync in background
 exp_dir="sweep_$SWEEP_ID"
 if [ -z "$S3_BUCKET" ]; then
@@ -40,6 +26,20 @@ else
         echo "Synced data to S3 at $(date)"
     done) &
 fi
+
+# Create logs directory if it doesn't exist
+mkdir -p logs
+
+# Activate conda environment
+eval "$($HOME/miniconda/bin/conda shell.bash hook)"
+conda activate ksim
+
+# Prevent JAX from grabbing all GPUs in the config generation step
+export CUDA_VISIBLE_DEVICES=""
+export XLA_PYTHON_CLIENT_PREALLOCATE="false"
+
+# First generate all configs
+python create_sweep.py
 
 
 # Launch workers in parallel, each with its own GPU environment
