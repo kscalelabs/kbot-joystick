@@ -32,8 +32,8 @@ def get_all_commands():
         # Add max_steps
         param_dict["max_steps"] = MAX_STEPS
         param_dict["disable_multiprocessing"] = True
-        param_dict["valid_every_n_steps"] = None # disable validation steps to save compute
-        param_dict["valid_every_n_seconds"] = None
+        param_dict["valid_every_n_steps"] = "null" #null is converted to None  # disable validation steps to save compute
+        param_dict["valid_every_n_seconds"] = "null"
 
         # Convert to command line args
         cmd_args = " ".join([f"{k}={v}" for k, v in param_dict.items()])
