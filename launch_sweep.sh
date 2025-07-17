@@ -16,15 +16,16 @@ exp_dir="sweep_$SWEEP_ID"
 if [ -z "$S3_BUCKET" ]; then
     echo "Warning: S3_BUCKET environment variable not set, skipping S3 sync"
 else
-    (while true; do
-        sleep 600
-        aws s3 sync "sweep_runs/" "s3://$S3_BUCKET/kbot-joystick/$exp_dir" \
-            --delete \
-            --only-show-errors \
-            --exclude "*/.nfs*" \
-            --exclude "*/tmp/*"
-        echo "Synced data to S3 at $(date)"
-    done) &
+    nohup bash -c '
+        while true; do
+            sleep 600
+            aws s3 sync "sweep_runs/" "s3://$S3_BUCKET/kbot-joystick/$exp_dir" \
+                --delete \
+                --only-show-errors \
+                --exclude "*/.nfs*" \
+                --exclude "*/tmp/*"
+            echo "Synced data to S3 at $(date)"
+        done' > logs/aws_sync.log 2>&1 &
 fi
 
 # Create logs directory if it doesn't exist
