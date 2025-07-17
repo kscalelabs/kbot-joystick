@@ -26,13 +26,14 @@ def get_all_commands():
         param_dict = dict(zip(keys, items))
 
         # Add exp_dir
-        exp_dir = f"sweep_runs/logs/sweep__" + "_".join(f"{k}{v}" for k, v in param_dict.items())
+        exp_dir = f"sweep_runs/logs/" + "_".join(f"{k}{v}" for k, v in param_dict.items())
         param_dict["exp_dir"] = exp_dir
 
         # Add max_steps
         param_dict["max_steps"] = MAX_STEPS
         param_dict["disable_multiprocessing"] = True
-        param_dict["render_full_every_n_seconds"] = 9999999999
+        param_dict["valid_every_n_steps"] = None # disable validation steps to save compute
+        param_dict["valid_every_n_seconds"] = None
 
         # Convert to command line args
         cmd_args = " ".join([f"{k}={v}" for k, v in param_dict.items()])
@@ -62,10 +63,6 @@ def main():
             f.write(f"{cmd}\n")
     
     print(f"Saved commands to {command_file}")
-    print("To start the sweep, run:")
-    print("  python run_worker.py 0  # For GPU 0")
-    print("  python run_worker.py 1  # For GPU 1")
-    print("  etc...")
 
 if __name__ == "__main__":
     main() 

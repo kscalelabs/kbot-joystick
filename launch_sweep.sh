@@ -18,7 +18,7 @@ if [ -z "$S3_BUCKET" ]; then
 else
     (while true; do
         sleep 600
-        aws s3 sync "xxx" "s3://$S3_BUCKET/kbot-joystick/$exp_dir" \
+        aws s3 sync "sweep_runs/" "s3://$S3_BUCKET/kbot-joystick/$exp_dir" \
             --delete \
             --only-show-errors \
             --exclude "*/.nfs*" \
