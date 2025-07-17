@@ -5,15 +5,13 @@ import json
 from pathlib import Path
 import random
 
-MAX_STEPS = 5000
+MAX_STEPS = 10000
 
 # Define the hyperparameters to sweep over
 SWEEP_PARAMS = {
-    # "entropy_coef": [0.002, 0.004, 0.008], # 0.004
-    "gamma": [0.88, 0.90, 0.91, 0.92, 0.93], # 0.92
-    # "num_passes": [2, 4], # 4
-    "lam": [0.92, 0.93, 0.94, 0.95], # 0.95
-    "learning_rate": [3e-4, 4e-4, 5e-4], # 3e-4
+    "learning_rate": [1e-4, 3e-4, 5e-4, 6e-4, 7e-4], # 5e-4
+    "gamma": [0.90, 0.93, 0.95, 0.96], # 0.9
+    "lam": [0.92, 0.93, 0.94, 0.95], # 0.94
 }
 
 def get_all_commands():

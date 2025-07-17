@@ -1526,8 +1526,8 @@ if __name__ == "__main__":
             render_length_seconds=10,
             max_values_per_plot=50,
             # Checkpointing parameters.
-            save_every_n_seconds=60,
-            valid_every_n_steps=100,
+            save_every_n_seconds=600,
+            valid_every_n_steps=None,
             valid_every_n_seconds=None,
         ),
     )
