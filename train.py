@@ -148,22 +148,6 @@ class ContactForcePenalty(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class SimpleSingleFootContactReward(ksim.Reward):
-    """Reward having one and only one foot in contact with the ground, while walking."""
-
-    scale: float = 1.0
-
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
-        single = jnp.logical_xor(left_contact, right_contact)
-
-        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(is_zero_cmd, 1.0, single)
-        return reward
-
-
-@attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.StatefulReward):
     """Reward having one and only one foot in contact with the ground, while walking.
 
