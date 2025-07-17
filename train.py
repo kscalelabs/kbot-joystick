@@ -424,15 +424,45 @@ class HfieldBaseHeightReward(ksim.Reward):
     Compatible with hfield scenes, where floor height is variable.
     """
 
+    base_idx: int = attrs.field()
+    foot_left_idx: int = attrs.field()
+    foot_right_idx: int = attrs.field()
     error_scale: float = attrs.field(default=0.25)
     standard_height: float = attrs.field(default=0.9)
+    foot_origin_height: float = attrs.field(default=0.0)
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        base_body_name: str,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        scale: float,
+        error_scale: float,
+        standard_height: float,
+        foot_origin_height: float,
+    ) -> Self:
+        base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
+        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(
+            base_idx=base,
+            foot_left_idx=fl,
+            foot_right_idx=fr,
+            scale=scale,
+            error_scale=error_scale,
+            standard_height=standard_height,
+            foot_origin_height=foot_origin_height,
+        )
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        left_foot_z = trajectory.xpos[:, 23, 2]
-        right_foot_z = trajectory.xpos[:, 18, 2]
+        left_foot_z = trajectory.xpos[:, self.foot_left_idx, 2] - self.foot_origin_height
+        right_foot_z = trajectory.xpos[:, self.foot_right_idx, 2] - self.foot_origin_height
         lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
 
-        base_z = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
+        base_z = trajectory.xpos[:, self.base_idx, 2]
 
         current_height = base_z - lowest_foot_z
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
@@ -1229,7 +1259,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.1, error_scale=0.01),
             BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),  # only works on scene 'smooth'
-            # HfieldBaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.92),
+            # HfieldBaseHeightReward.create(
+            #     physics_model=physics_model,
+            #     base_body_name="base",
+            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+            #     scale=0.05,
+            #     error_scale=0.05,
+            #     standard_height=0.98,
+            #     foot_origin_height=0.06,
+            # ),
             # shaping
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.1),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
