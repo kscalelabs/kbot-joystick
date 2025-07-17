@@ -418,7 +418,7 @@ class BaseHeightReward(ksim.Reward):
 
 
 @attrs.define(frozen=True)
-class HfieldBaseHeightReward(ksim.Reward):
+class TerrainBaseHeightReward(ksim.Reward):
     """Reward for keeping a set distance between the base and the lowest foot.
 
     Compatible with hfield scenes, where floor height is variable.
@@ -631,7 +631,7 @@ class FeetPositionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True)
-class BaseHeightObservation(ksim.Observation):
+class BaseHeightObservation(ksim.Observation): # TODO not terrain compatible
     """Observation of the base height."""
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -1259,7 +1259,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.1, error_scale=0.01),
             BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),  # only works on scene 'smooth'
-            # HfieldBaseHeightReward.create(
+            # TerrainBaseHeightReward.create(
             #     physics_model=physics_model,
             #     base_body_name="base",
             #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
