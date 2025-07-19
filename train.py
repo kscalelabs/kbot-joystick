@@ -239,34 +239,16 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class JointPositionPenalty(ksim.JointDeviationPenalty):
-    @classmethod
-    def create_from_names(
-        cls,
-        names: list[str],
-        physics_model: ksim.PhysicsModel,
-        scale: float = -1.0,
-        scale_by_curriculum: bool = False,
-        error_scale: float = 0.1,
-    ) -> Self:
-        zeros = {k: v for k, v, _ in ZEROS}
-        weights = {k: v for k, _, v in ZEROS}
-        joint_targets = [zeros[name] for name in names]
-        joint_weights = [weights[name] for name in names]
+class ArmPositionReward(ksim.Reward):
+    """Reward for tracking commanded arm joint positions.
 
-        return cls.create(
-            physics_model=physics_model,
-            joint_names=tuple(names),
-            joint_targets=tuple(joint_targets),
-            joint_weights=tuple(joint_weights),
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
+    Compares the current arm joint positions against commanded positions from
+    trajectory.command["unified_command"][7:].
+    """
 
-
-@attrs.define(frozen=True, kw_only=True)
-class ArmPositionReward(JointPositionPenalty):
+    joint_indices: tuple[int, ...] = attrs.field()
     error_scale: float = attrs.field(default=0.1)
+    norm: xax.NormType = attrs.field(default="l2")
 
     @classmethod
     def create_reward(
@@ -276,30 +258,36 @@ class ArmPositionReward(JointPositionPenalty):
         error_scale: float = 0.1,
         scale_by_curriculum: bool = False,
     ) -> Self:
-        reward = cls.create_from_names(
-            names=[
-                "dof_right_shoulder_pitch_03",
-                "dof_right_shoulder_roll_03",
-                "dof_right_shoulder_yaw_02",
-                "dof_right_elbow_02",
-                "dof_right_wrist_00",
-                "dof_left_shoulder_pitch_03",
-                "dof_left_shoulder_roll_03",
-                "dof_left_shoulder_yaw_02",
-                "dof_left_elbow_02",
-                "dof_left_wrist_00",
-            ],
-            physics_model=physics_model,
+        # Define the arm joint names in order
+        joint_names = (
+            "dof_right_shoulder_pitch_03",
+            "dof_right_shoulder_roll_03",
+            "dof_right_shoulder_yaw_02",
+            "dof_right_elbow_02",
+            "dof_right_wrist_00",
+            "dof_left_shoulder_pitch_03",
+            "dof_left_shoulder_roll_03",
+            "dof_left_shoulder_yaw_02",
+            "dof_left_elbow_02",
+            "dof_left_wrist_00",
+        )
+
+        # Map joint names to indices
+        joint_to_idx = ksim.get_qpos_data_idxs_by_name(physics_model)
+        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+
+        return cls(
+            joint_indices=joint_indices,
+            error_scale=error_scale,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
-            error_scale=error_scale,
         )
-        return reward
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        error = super().get_reward(trajectory)
-        reward = jnp.exp(-error / self.error_scale)
-        return reward
+        qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
+        target = trajectory.command["unified_command"][..., 7:]
+        error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
+        return jnp.exp(-error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -631,7 +619,7 @@ class FeetPositionObservation(ksim.Observation):
 
 
 @attrs.define(frozen=True)
-class BaseHeightObservation(ksim.Observation): # TODO not terrain compatible
+class BaseHeightObservation(ksim.Observation):  # TODO not terrain compatible
     """Observation of the base height."""
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
@@ -754,11 +742,12 @@ class UnifiedCommand(ksim.Command):
     bh_standing_range: tuple[float, float] = attrs.field()
     rx_range: tuple[float, float] = attrs.field()
     ry_range: tuple[float, float] = attrs.field()
+    arms_range: tuple[float, float] = attrs.field()
     ctrl_dt: float = attrs.field()
     switch_prob: float = attrs.field()
 
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h = jax.random.split(rng, 8)
+        rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h, rng_i = jax.random.split(rng, 9)
 
         # cmd  = [vx, vy, wz, bh, rx, ry]
         vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
@@ -768,6 +757,7 @@ class UnifiedCommand(ksim.Command):
         bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
+        arms = jax.random.uniform(rng_i, (10,), minval=self.arms_range[0], maxval=self.arms_range[1])
 
         # don't like super small velocity commands
         vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
@@ -775,14 +765,15 @@ class UnifiedCommand(ksim.Command):
         wz = jnp.where(jnp.abs(wz) < 0.05, 0.0, wz)
 
         _ = jnp.zeros_like(vx)
+        __ = jnp.zeros_like(arms)
 
         # Create each mode's command vector
-        forward_cmd = jnp.concatenate([vx, _, _, bh, _, _])
-        sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _])
-        rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _])
-        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _])
-        stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry])
-        stand_cmd = jnp.concatenate([_, _, _, _, _, _])
+        forward_cmd = jnp.concatenate([vx, _, _, bh, _, _, __])
+        sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _, __])
+        rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _, __])
+        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _, __])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry, arms])
+        stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
@@ -802,7 +793,7 @@ class UnifiedCommand(ksim.Command):
         init_euler = xax.quat_to_euler(physics_data.xquat[1])
         init_heading = init_euler[2] + self.ctrl_dt * cmd[2]  # add 1 step of yaw vel cmd to initial heading.
         cmd = jnp.concatenate([cmd[:3], jnp.array([init_heading]), cmd[3:]])
-        assert cmd.shape == (7,)
+        assert cmd.shape == (17,)
 
         return cmd
 
@@ -1134,6 +1125,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bh_standing_range=(-0.2, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
+                arms_range=(-0.3, 0.3),  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
             ),
@@ -1204,6 +1196,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 1  # angular velocity command (wz)
             + 1  # base height command (bh)
             + 2  # base xy orientation command (rx, ry)
+            + 10  # arm commands (10)
         )
 
         num_actor_inputs = (
@@ -1254,14 +1247,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        cmd = commands["unified_command"]
+        lin_vel_cmd = commands["unified_command"][..., :2]
+        ang_vel_cmd = commands["unified_command"][..., 2:3]
+        base_height_cmd = commands["unified_command"][..., 4:5]
+        base_roll_pitch_cmd = commands["unified_command"][..., 5:7]
+        arms_cmd = commands["unified_command"][..., 7:]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
-            cmd[..., :3],  # dropheading carry
-            cmd[..., 4:],
+            lin_vel_cmd,  # 2
+            ang_vel_cmd,  # 1
+            base_height_cmd,  # 1
+            base_roll_pitch_cmd,  # 2
+            arms_cmd,  # 10
         ]
         if self.config.use_gyro:
             obs += [
@@ -1284,7 +1284,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_vel_n = observations["joint_velocity_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        cmd = commands["unified_command"]
+        lin_vel_cmd = commands["unified_command"][..., :2]
+        ang_vel_cmd = commands["unified_command"][..., 2:3]
+        base_height_cmd = commands["unified_command"][..., 3:4]
+        base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
+        arms_cmd = commands["unified_command"][..., 7:]
 
         # privileged obs
         left_touch = observations["sensor_observation_left_foot_touch"]
@@ -1305,9 +1309,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 joint_pos_n,
                 joint_vel_n / 10.0,  # TODO fix this
                 imu_quat_4,
-                cmd[..., :3],  # drop heading carry
-                cmd[..., 4:],
-                imu_gyro_3,  # rad/s
+                lin_vel_cmd,
+                ang_vel_cmd,
+                base_height_cmd,
+                base_roll_pitch_cmd,
+                arms_cmd,
+                imu_gyro_3,
                 # privileged obs:
                 left_touch,
                 right_touch,
