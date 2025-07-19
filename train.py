@@ -743,106 +743,6 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         return x, (x, lag, bias)
 
 
-@attrs.define(kw_only=True)
-class UnifiedLinearVelocityCommandMarker(ksim.vis.Marker):
-    """Visualise the planar (x,y) velocity command from unified command."""
-
-    command_name: str = attrs.field()
-    size: float = attrs.field(default=0.03)
-    arrow_scale: float = attrs.field(default=0.1)
-    height: float = attrs.field(default=0.5)
-    base_length: float = attrs.field(default=0.25)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        cmd = trajectory.command[self.command_name]
-        vx, vy = float(cmd[0]), float(cmd[1])
-        speed = (vx * vx + vy * vy) ** 0.5
-        self.pos = (0.0, 0.0, self.height)
-
-        # Always show arrow with base length plus scaling
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        arrow_length = self.base_length + self.arrow_scale * speed
-        self.scale = (self.size, self.size, arrow_length)
-
-        if speed < 1e-4:  # zero command → point forward, grey color
-            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-        else:  # non-zero command → point in command direction, green color
-            self.orientation = self.quat_from_direction((vx, vy, 0.0))
-            self.rgba = (0.2, 0.8, 0.2, 0.8)
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        *,
-        arrow_scale: float = 0.1,
-        height: float = 0.5,
-        base_length: float = 0.25,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(0.03, 0.03, base_length),
-            arrow_scale=arrow_scale,
-            height=height,
-            base_length=base_length,
-            track_rotation=True,
-        )
-
-
-@attrs.define(kw_only=True)
-class UnifiedAbsoluteYawCommandMarker(ksim.vis.Marker):
-    """Visualise the absolute yaw command from unified command."""
-
-    command_name: str = attrs.field()
-    size: float = attrs.field(default=0.02)
-    height: float = attrs.field(default=0.7)
-    arrow_scale: float = attrs.field(default=0.1)
-    base_length: float = attrs.field(default=0.25)
-
-    def update(self, trajectory: ksim.Trajectory) -> None:
-        cmd = trajectory.command[self.command_name]
-        yaw = float(cmd[3])  # yaw command is in position 3
-        self.pos = (0.0, 0.0, self.height)
-
-        # Always show arrow with base length plus scaling
-        self.geom = mujoco.mjtGeom.mjGEOM_ARROW
-        arrow_length = self.base_length + self.arrow_scale * abs(yaw)
-        self.scale = (self.size, self.size, arrow_length)
-
-        if abs(yaw) < 1e-4:  # zero command → point forward, grey color
-            self.orientation = self.quat_from_direction((1.0, 0.0, 0.0))
-            self.rgba = (0.8, 0.8, 0.8, 0.8)
-        else:  # non-zero command → point in yaw direction, blue color
-            # Convert yaw to direction vector (rotate around z-axis)
-            direction_x = jnp.cos(yaw)
-            direction_y = jnp.sin(yaw)
-            self.orientation = self.quat_from_direction((float(direction_x), float(direction_y), 0.0))
-            self.rgba = (0.2, 0.2, 0.8, 0.8)
-
-    @classmethod
-    def get(
-        cls,
-        command_name: str,
-        *,
-        arrow_scale: float = 0.1,
-        height: float = 0.7,
-        base_length: float = 0.25,
-    ) -> Self:
-        return cls(
-            command_name=command_name,
-            target_type="root",
-            geom=mujoco.mjtGeom.mjGEOM_ARROW,
-            scale=(0.02, 0.02, base_length),
-            arrow_scale=arrow_scale,
-            height=height,
-            base_length=base_length,
-            track_rotation=False,
-        )
-
-
 @attrs.define(frozen=True)
 class UnifiedCommand(ksim.Command):
     """Unifiying all commands into one to allow for covariance control."""
@@ -922,19 +822,6 @@ class UnifiedCommand(ksim.Command):
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_command = self.initial_command(physics_data, curriculum_level, rng_b)
         return jnp.where(switch_mask, new_command, continued_command)
-
-    def get_markers(self) -> list[ksim.vis.Marker]:
-        """Return markers for visualizing the unified command components."""
-        return [
-            UnifiedAbsoluteYawCommandMarker.get(
-                command_name=self.command_name,
-                height=0.7,
-            ),
-            UnifiedLinearVelocityCommandMarker.get(
-                command_name=self.command_name,
-                height=0.5,
-            ),
-        ]
 
 
 class Actor(eqx.Module):
