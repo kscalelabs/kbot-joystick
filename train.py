@@ -326,7 +326,8 @@ class ArmPositionReward(ksim.Reward):
     trajectory.command["unified_command"][7:].
     """
 
-    joint_indices: tuple[int, ...] = attrs.field()
+    joint_indices: Array = attrs.field()
+    joint_biases: Array = attrs.field()
     error_scale: float = attrs.field(default=0.1)
     norm: xax.NormType = attrs.field(default="l2")
 
@@ -354,10 +355,12 @@ class ArmPositionReward(ksim.Reward):
 
         # Map joint names to indices
         joint_to_idx = ksim.get_qpos_data_idxs_by_name(physics_model)
-        joint_indices = tuple([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        joint_indices = jnp.array([int(joint_to_idx[name][0]) - 7 for name in joint_names])
+        joint_biases = jnp.array([bias for (name, bias, _) in ZEROS if name in joint_names])
 
         return cls(
             joint_indices=joint_indices,
+            joint_biases=joint_biases,
             error_scale=error_scale,
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
@@ -365,7 +368,7 @@ class ArmPositionReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
-        target = trajectory.command["unified_command"][..., 7:]
+        target = trajectory.command["unified_command"][..., 7:] + self.joint_biases
         error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
         return jnp.exp(-error / self.error_scale)
 
