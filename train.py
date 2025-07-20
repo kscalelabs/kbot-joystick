@@ -239,6 +239,86 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class KsimFeetAirTimeReward(ksim.StatefulReward):
+    """Reward for feet either touching or not touching the ground for some time."""
+
+    threshold: float = attrs.field()
+    ctrl_dt: float = attrs.field()
+    num_feet: int = attrs.field(default=2)
+    start_reward: float = attrs.field(
+        default=0.1,
+        validator=attrs.validators.and_(
+            attrs.validators.ge(0.0),
+            attrs.validators.le(1.0),
+        ),
+    )
+
+    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
+        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
+
+    def get_reward_stateful(
+        self,
+        trajectory: ksim.Trajectory,
+        reward_carry: tuple[Array, Array],
+    ) -> tuple[Array, tuple[Array, Array]]:
+        left_contact = trajectory.obs["sensor_observation_left_foot_touch"] > 0.1
+        right_contact = trajectory.obs["sensor_observation_right_foot_touch"] > 0.1
+        sensor_data_tn = jnp.stack([left_contact[:, 0], right_contact[:, 0]], axis=-1)
+
+        threshold_steps = round(self.threshold / self.ctrl_dt)
+
+        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
+            count_n, cooldown_n = carry
+            contact_n, done = x
+
+            # The logic for this algorithm is to reward the agent for having
+            # some foot off the ground for up to `threshold_steps` steps, but
+            # then don't reward it for some cooldown period after that.
+            on_cooldown = cooldown_n > 0
+
+            cooldown_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    cooldown_n - 1,
+                    jnp.where(
+                        contact_n & (count_n > 0),
+                        jnp.minimum(count_n, threshold_steps),
+                        0,
+                    ),
+                ),
+            )
+
+            count_n = jnp.where(
+                done,
+                0,
+                jnp.where(
+                    on_cooldown,
+                    0,
+                    jnp.where(
+                        contact_n,
+                        0,
+                        count_n + 1,
+                    ),
+                ),
+            )
+
+            return (count_n, cooldown_n), count_n
+
+        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
+
+        # Slight upward slope as the steps get longer. Make sure that the
+        # average value will be 1 after taking a full step.
+        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
+
+        # Gradually increase reward until `threshold_steps`.
+        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+
+        return reward_tn.max(axis=-1), reward_carry
+
+
+@attrs.define(frozen=True, kw_only=True)
 class ArmPositionReward(ksim.Reward):
     """Reward for tracking commanded arm joint positions.
 
@@ -391,21 +471,6 @@ class XYOrientationReward(ksim.Reward):
 
 
 @attrs.define(frozen=True)
-class BaseHeightReward(ksim.Reward):
-    """Reward for keeping the base height at the commanded height."""
-
-    error_scale: float = attrs.field(default=0.25)
-    standard_height: float = attrs.field(default=1.0)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        current_height = trajectory.xpos[:, 1, 2]  # 1st body, because world is 0. 2nd element is z.
-        commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
-
-        height_error = jnp.abs(current_height - commanded_height)
-        return jnp.exp(-height_error / self.error_scale)
-
-
-@attrs.define(frozen=True)
 class TerrainBaseHeightReward(ksim.Reward):
     """Reward for keeping a set distance between the base and the lowest foot.
 
@@ -454,8 +519,11 @@ class TerrainBaseHeightReward(ksim.Reward):
 
         current_height = base_z - lowest_foot_z
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
-
         height_error = jnp.abs(current_height - commanded_height)
+
+        # for walking: only care about minimum height.
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        height_error = jnp.where(is_zero_cmd, height_error, jnp.maximum(height_error, 0.0))
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -1137,20 +1205,25 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.3, error_scale=0.05),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             XYOrientationReward(scale=0.1, error_scale=0.01),
-            BaseHeightReward(scale=0.05, error_scale=0.05, standard_height=0.98),  # only works on scene 'smooth'
-            # TerrainBaseHeightReward.create(
-            #     physics_model=physics_model,
-            #     base_body_name="base",
-            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-            #     scale=0.05,
-            #     error_scale=0.05,
-            #     standard_height=0.98,
-            #     foot_origin_height=0.06,
-            # ),
+            TerrainBaseHeightReward.create(
+                physics_model=physics_model,
+                base_body_name="base",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                scale=0.05,
+                error_scale=0.05,
+                standard_height=0.98,
+                foot_origin_height=0.06,
+            ),
             # shaping
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            # KsimFeetAirTimeReward(
+            #     scale=0.8,
+            #     start_reward=0.1,
+            #     threshold=0.3,
+            #     ctrl_dt=self.config.ctrl_dt,
+            # ),
             FeetOrientationReward.create(
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
