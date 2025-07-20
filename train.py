@@ -522,11 +522,11 @@ class TerrainBaseHeightReward(ksim.Reward):
 
         current_height = base_z - lowest_foot_z
         commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
-        height_error = jnp.abs(current_height - commanded_height)
+        height_diff = current_height - commanded_height
 
         # for walking: only care about minimum height.
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        height_error = jnp.where(is_zero_cmd, height_error, jnp.maximum(height_error, 0.0))
+        height_error = jnp.where(is_zero_cmd, jnp.abs(height_diff), jnp.abs(jnp.minimum(height_diff, 0.0)))
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -920,6 +920,7 @@ class TerrainBadZTermination(ksim.Termination):
         lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
         height = base_z - lowest_foot_z
         return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+
 
 class Actor(eqx.Module):
     """Actor for the walking task."""
@@ -1379,7 +1380,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
-            joint_vel_n, # / 10.0  # NUM_JOINTS
+            joint_vel_n,  # / 10.0  # NUM_JOINTS
             imu_quat_4,  # 4
             lin_vel_cmd,  # 2
             ang_vel_cmd,  # 1
