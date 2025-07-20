@@ -682,6 +682,16 @@ class BaseHeightObservation(ksim.Observation):  # TODO not terrain compatible
         return state.physics_state.data.xpos[1, 2:]
 
 
+class QposObservation(ksim.Observation):
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.qpos[7:]
+
+
+class QvelObservation(ksim.Observation):
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        return state.physics_state.data.qvel
+
+
 @attrs.define(frozen=True, kw_only=True)
 class ImuOrientationObservation(ksim.StatefulObservation):
     """Observes the IMU orientation, back spun in yaw heading, as commanded.
@@ -1130,14 +1140,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=0.1),
             ksim.RandomJointVelocityReset(scale=2.0),
-            ksim.RandomBaseVelocityReset(scale=0.2),
+            ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
         return [
             ksim.JointPositionObservation(noise=math.radians(2)),
+            QposObservation(),  # noise free joint position for critic
             ksim.JointVelocityObservation(noise=math.radians(10)),
+            QvelObservation(),  # noise free joint velocity for critic
             ksim.ActuatorForceObservation(),
             ksim.CenterOfMassInertiaObservation(),
             ksim.CenterOfMassVelocityObservation(),
@@ -1241,7 +1253,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
+            # ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
             ksim.NotUprightTermination(max_radians=math.radians(60)),
             ksim.EpisodeLengthTermination(max_length_sec=24),
         ]
@@ -1320,7 +1332,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
-            joint_vel_n,  # NUM_JOINTS
+            joint_vel_n, # / 10.0  # NUM_JOINTS
             imu_quat_4,  # 4
             lin_vel_cmd,  # 2
             ang_vel_cmd,  # 1
@@ -1346,7 +1358,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         carry: Array,
     ) -> tuple[Array, Array]:
         joint_pos_n = observations["joint_position_observation"]
+        qpos_n = observations["qpos_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
+        qvel_n = observations["qvel_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         lin_vel_cmd = commands["unified_command"][..., :2]
@@ -1372,7 +1386,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             [
                 # actor obs:
                 joint_pos_n,
+                # qpos_n,
                 joint_vel_n / 10.0,  # TODO fix this
+                # qvel_n / 10.0 ,
                 imu_quat_4,
                 lin_vel_cmd,
                 ang_vel_cmd,
