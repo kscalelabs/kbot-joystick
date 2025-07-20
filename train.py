@@ -326,8 +326,8 @@ class ArmPositionReward(ksim.Reward):
     trajectory.command["unified_command"][7:].
     """
 
-    joint_indices: Array = attrs.field()
-    joint_biases: Array = attrs.field()
+    joint_indices: Array = attrs.field(eq=False)
+    joint_biases: Array = attrs.field(eq=False)
     error_scale: float = attrs.field(default=0.1)
     norm: xax.NormType = attrs.field(default="l2")
 
