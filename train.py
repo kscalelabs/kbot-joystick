@@ -689,7 +689,7 @@ class QposObservation(ksim.Observation):
 
 class QvelObservation(ksim.Observation):
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.qvel
+        return state.physics_state.data.qvel[6:]
 
 
 @attrs.define(frozen=True, kw_only=True)
