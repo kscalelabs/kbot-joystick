@@ -881,6 +881,46 @@ class UnifiedCommand(ksim.Command):
         return jnp.where(switch_mask, new_command, continued_command)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class TerrainBadZTermination(ksim.Termination):
+    """Terminates the episode if the robot base is too low. Compatible with terrain."""
+
+    base_idx: int = attrs.field()
+    foot_left_idx: int = attrs.field()
+    foot_right_idx: int = attrs.field()
+    unhealthy_z_lower: float = attrs.field()
+    unhealthy_z_upper: float = attrs.field()
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        physics_model: ksim.PhysicsModel,
+        base_body_name: str,
+        foot_left_body_name: str,
+        foot_right_body_name: str,
+        unhealthy_z_lower: float,
+        unhealthy_z_upper: float,
+    ) -> Self:
+        base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
+        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
+        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
+        return cls(
+            base_idx=base,
+            foot_left_idx=fl,
+            foot_right_idx=fr,
+            unhealthy_z_lower=unhealthy_z_lower,
+            unhealthy_z_upper=unhealthy_z_upper,
+        )
+
+    def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
+        base_z = state.xpos[self.base_idx, 2]
+        left_foot_z = state.xpos[self.foot_left_idx, 2]
+        right_foot_z = state.xpos[self.foot_right_idx, 2]
+        lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
+        height = base_z - lowest_foot_z
+        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -1253,7 +1293,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
-            # ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
+            TerrainBadZTermination.create(
+                physics_model=physics_model,
+                base_body_name="base",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                unhealthy_z_lower=0.6,
+                unhealthy_z_upper=1.2,
+            ),
             ksim.NotUprightTermination(max_radians=math.radians(45)),
             ksim.EpisodeLengthTermination(max_length_sec=24),
         ]
