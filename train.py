@@ -590,7 +590,7 @@ class FeetPositionReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class FeetOrientationReward(ksim.Reward):
-    """Reward for keeping feet pitch and roll oriented parallel to the ground."""
+    """Reward for keeping feet pitch and roll oriented parallel to the ground, when standing."""
 
     scale: float = attrs.field(default=1.0)
     error_scale: float = attrs.field(default=0.25)
@@ -627,24 +627,9 @@ class FeetOrientationReward(ksim.Reward):
         right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_right_idx, :], axis=-1) ** 2
         standing_error = left_quat_error + right_quat_error
 
-        # compute error for walking
-        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_left_idx, :])
-        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_right_idx, :])
-
-        # for walking, mask out yaw
-        left_foot_quat = xax.euler_to_quat(left_foot_euler.at[:, 2].set(0.0))
-        right_foot_quat = xax.euler_to_quat(right_foot_euler.at[:, 2].set(0.0))
-
-        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0, 0], axis=-1)
-        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
-
-        left_quat_error = 1 - jnp.sum(straight_foot_quat * left_foot_quat, axis=-1) ** 2
-        right_quat_error = 1 - jnp.sum(straight_foot_quat * right_foot_quat, axis=-1) ** 2
-        walking_error = left_quat_error + right_quat_error
-
-        # choose standing or walking error based on command
+        # only care about standing error
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        total_error = jnp.where(is_zero_cmd, standing_error, walking_error)
+        total_error = jnp.where(is_zero_cmd, standing_error, 0.0)
 
         return jnp.exp(-total_error / self.error_scale)
 
