@@ -1246,15 +1246,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # ),
             # sim2real
             ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
-            ksim.JointVelocityPenalty(scale=-0.5),
-            ksim.JointAccelerationPenalty(scale=-0.5),
-            ksim.CtrlPenalty(scale=-0.0001),
+            ksim.JointVelocityPenalty(scale=-0.05),
+            ksim.JointAccelerationPenalty(scale=-0.05),
+            ksim.CtrlPenalty(scale=-0.00001),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
         return [
             # ksim.BadZTermination(unhealthy_z_lower=0.6, unhealthy_z_upper=1.2),
-            ksim.NotUprightTermination(max_radians=math.radians(60)),
+            ksim.NotUprightTermination(max_radians=math.radians(45)),
             ksim.EpisodeLengthTermination(max_length_sec=24),
         ]
 
