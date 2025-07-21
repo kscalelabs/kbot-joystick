@@ -922,6 +922,27 @@ class TerrainBadZTermination(ksim.Termination):
         return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class PlaneXYPositionReset(ksim.Reset):
+    """Resets the robot's XY position"""
+
+    x_range: float = attrs.field(default=1.0)
+    y_range: float = attrs.field(default=1.0)
+
+    def __call__(self, data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> ksim.PhysicsData:
+        keyx, keyy = jax.random.split(rng)
+        new_x = jax.random.uniform(keyx, (1,), minval=-self.x_range, maxval=self.x_range)
+        new_y = jax.random.uniform(keyy, (1,), minval=-self.y_range, maxval=self.y_range)
+
+        qpos_j = data.qpos
+        if type(qpos_j) != jnp.ndarray:
+            return data
+        qpos_j = qpos_j.at[0:1].set(new_x)
+        qpos_j = qpos_j.at[1:2].set(new_y)
+        data = ksim.update_data_field(data, "qpos", qpos_j)
+        return data
+
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -1183,6 +1204,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
+            PlaneXYPositionReset(x_range=2.0, y_range=2.0),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
