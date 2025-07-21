@@ -14,7 +14,7 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 6
+NUM_COMMANDS_MODEL = 16
 
 
 def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
@@ -113,6 +113,7 @@ def main() -> None:
         cmd_yaw_rate = command[..., 2:3]
         cmd_body_height = command[..., 3:4]
         cmd_body_orientation = command[..., 4:6]
+        cmd_arms = command[..., 6:]
 
         # update heading based on yaw rate command
         heading = heading_carry[0] + cmd_yaw_rate * 0.02  # TODO hardcoding dt for now
@@ -133,6 +134,7 @@ def main() -> None:
                 cmd_yaw_rate,
                 cmd_body_height,
                 cmd_body_orientation,
+                cmd_arms,
                 gyroscope,
             ],
             axis=-1,
