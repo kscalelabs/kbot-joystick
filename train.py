@@ -825,6 +825,11 @@ class UnifiedCommand(ksim.Command):
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
         arms = jax.random.uniform(rng_i, (10,), minval=self.arms_range[0], maxval=self.arms_range[1])
 
+        # 50% chance to mask out 8/10 arm commands
+        should_mask = jax.random.bernoulli(rng_i, p=0.5)
+        mask_indices = jax.random.choice(rng_i, 10, shape=(8,), replace=False)
+        arms = jnp.where(should_mask & jnp.isin(jnp.arange(10), mask_indices), 0.0, arms)
+
         # don't like super small velocity commands
         vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
         vy = jnp.where(jnp.abs(vy) < 0.05, 0.0, vy)
