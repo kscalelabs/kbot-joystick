@@ -1380,7 +1380,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
-            joint_vel_n / 10.0,  # NUM_JOINTS
+            joint_vel_n,  # NUM_JOINTS
             imu_quat_4,  # 4
             lin_vel_cmd,  # 2
             ang_vel_cmd,  # 1
@@ -1436,7 +1436,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 # joint_pos_n,
                 qpos_n,
                 # joint_vel_n / 10.0,  # TODO fix this
-                qvel_n / 10.0 ,
+                qvel_n / 10.0,
                 imu_quat_4,
                 lin_vel_cmd,
                 ang_vel_cmd,
