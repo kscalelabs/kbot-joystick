@@ -1569,6 +1569,7 @@ if __name__ == "__main__":
             action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
+            render_track_body_id=0,
             render_full_every_n_seconds=0,
             render_length_seconds=10,
             max_values_per_plot=50,
