@@ -1289,7 +1289,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             # KsimFeetAirTimeReward(
-            #     scale=0.8,
+            #     scale=0.3,
             #     start_reward=0.1,
             #     threshold=0.3,
             #     ctrl_dt=self.config.ctrl_dt,
