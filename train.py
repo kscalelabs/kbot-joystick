@@ -578,13 +578,12 @@ class FeetPositionReward(ksim.Reward):
         # calculate stance errors
         stance_x_error = jnp.abs(l_foot_pos[:, 0] - r_foot_pos[:, 0])
         stance_y_error = jnp.abs(jnp.abs(l_foot_pos[:, 1] - r_foot_pos[:, 1]) - self.stance_width)
-
         stance_error = stance_x_error + stance_y_error
-        reward = jnp.exp(-stance_error / self.error_scale)
 
         # only apply reward for standing
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward = jnp.where(zero_cmd_mask, reward, 0.0)
+        error = jnp.where(zero_cmd_mask, stance_error, 0.0)
+        reward = jnp.exp(-error / self.error_scale)
         return reward
 
 
@@ -1285,6 +1284,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 standard_height=0.98,
                 foot_origin_height=0.06,
             ),
+            ArmPositionReward.create_reward(physics_model, scale=0.1, error_scale=0.05),
             # shaping
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
@@ -1298,18 +1298,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-                scale=0.05,
+                scale=0.02,
                 error_scale=0.02,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.1, error_scale=0.05),
             # testing::
             # FeetPositionReward.create(
             #     physics_model=physics_model,
             #     base_body_name="base",
             #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
             #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-            #     scale=0.01,
-            #     error_scale=0.1,
+            #     scale=0.02,
+            #     error_scale=0.05,
             #     stance_width=0.30
             # ),
             # sim2real
