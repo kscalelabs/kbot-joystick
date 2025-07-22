@@ -1301,7 +1301,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.05,
                 error_scale=0.02,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.05, error_scale=0.05),
+            ArmPositionReward.create_reward(physics_model, scale=0.1, error_scale=0.05),
             # testing::
             # FeetPositionReward.create(
             #     physics_model=physics_model,
