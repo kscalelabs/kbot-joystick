@@ -830,10 +830,10 @@ class UnifiedCommand(ksim.Command):
         mask_indices = jax.random.choice(rng_i, 10, shape=(8,), replace=False)
         arms = jnp.where(should_mask & jnp.isin(jnp.arange(10), mask_indices), 0.0, arms)
 
-        # don't like super small velocity commands
-        vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
-        vy = jnp.where(jnp.abs(vy) < 0.05, 0.0, vy)
-        wz = jnp.where(jnp.abs(wz) < 0.05, 0.0, wz)
+        # # don't like super small velocity commands
+        # vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
+        # vy = jnp.where(jnp.abs(vy) < 0.05, 0.0, vy)
+        # wz = jnp.where(jnp.abs(wz) < 0.05, 0.0, wz)
 
         _ = jnp.zeros_like(vx)
         __ = jnp.zeros_like(arms)
@@ -1256,11 +1256,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         return [
             UnifiedCommand(
-                vx_range=(-0.5, 2.0),  # m/s
+                vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
-                wz_range=(-0.5, 0.5),  # rad/s
-                bh_range=(0.0, 0.0),  # m
-                bh_standing_range=(-0.2, 0.0),  # m
+                wz_range=(-0.7, 0.7),  # rad/s
+                bh_range=(-0.10, 0.0),  # m
+                bh_standing_range=(-0.25, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 arms_range=(-0.3, 0.3),  # rad
@@ -1286,7 +1286,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_origin_height=0.06,
             ),
             # shaping
-            SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.2),
+            SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             # KsimFeetAirTimeReward(
             #     scale=0.8,
