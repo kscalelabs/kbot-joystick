@@ -1432,9 +1432,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: Array,
     ) -> tuple[Array, Array]:
-        # joint_pos_n = observations["joint_position_observation"]
         qpos_n = observations["qpos_observation"]
-        # joint_vel_n = observations["joint_velocity_observation"]
         qvel_n = observations["qvel_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
@@ -1460,9 +1458,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs_n = jnp.concatenate(
             [
                 # actor obs:
-                # joint_pos_n,
                 qpos_n,
-                # joint_vel_n / 10.0,  # TODO fix this
                 qvel_n / 10.0,
                 imu_quat_4,
                 lin_vel_cmd,
