@@ -314,8 +314,13 @@ class KsimFeetAirTimeReward(ksim.StatefulReward):
 
         # Gradually increase reward until `threshold_steps`.
         reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
+        reward_t = reward_tn.max(axis=-1)
 
-        return reward_tn.max(axis=-1), reward_carry
+        # quickly hacking in zero command disabling. TODO needs tuning
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        reward_t = jnp.where(is_zero_cmd, 0.0, reward_t)
+
+        return reward_t, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
