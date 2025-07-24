@@ -1517,9 +1517,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
         transition_ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs,
+            log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
-            entropy=actor_dist.entropy(),
+            entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
             action_std=actor_dist.stddev(),
         )
 
