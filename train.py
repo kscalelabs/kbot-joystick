@@ -808,7 +808,7 @@ class UnifiedCommand(ksim.Command):
     bh_standing_range: tuple[float, float] = attrs.field()
     rx_range: tuple[float, float] = attrs.field()
     ry_range: tuple[float, float] = attrs.field()
-    arms_range: tuple[float, float] = attrs.field()
+    arms_range: Array = attrs.field()
     ctrl_dt: float = attrs.field()
     switch_prob: float = attrs.field()
 
@@ -823,17 +823,12 @@ class UnifiedCommand(ksim.Command):
         bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
-        arms = jax.random.uniform(rng_i, (10,), minval=self.arms_range[0], maxval=self.arms_range[1])
+        arms = jax.random.uniform(rng_i, (10,), minval=self.arms_range[:, 0], maxval=self.arms_range[:, 1])
 
         # 50% chance to mask out 8/10 arm commands
         should_mask = jax.random.bernoulli(rng_i, p=0.5)
         mask_indices = jax.random.choice(rng_i, 10, shape=(8,), replace=False)
         arms = jnp.where(should_mask & jnp.isin(jnp.arange(10), mask_indices), 0.0, arms)
-
-        # # don't like super small velocity commands
-        # vx = jnp.where(jnp.abs(vx) < 0.05, 0.0, vx)
-        # vy = jnp.where(jnp.abs(vy) < 0.05, 0.0, vy)
-        # wz = jnp.where(jnp.abs(wz) < 0.05, 0.0, wz)
 
         _ = jnp.zeros_like(vx)
         __ = jnp.zeros_like(arms)
@@ -879,6 +874,17 @@ class UnifiedCommand(ksim.Command):
             return prev_command
 
         continued_command = update_heading(prev_command)
+
+        # def update_arms(prev_command: Array) -> Array:
+        #     """Move arm commands by x rad/s."""
+        #     arms = prev_command[7:17]
+        #     arm_mask = jnp.where(arms != 0.0, 1.0, 0.0)
+        #     arms = arms + arm_mask * self.ctrl_dt * 0.5
+        #     arms = arms.clamp(self.arms_range[:, 0], self.arms_range[:, 1])
+        #     prev_command = prev_command.at[7:17].set(arms)
+        #     return prev_command
+
+        # continued_command = update_arms(continued_command)
 
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
@@ -1248,6 +1254,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+        arm_joint_names = [name for name, _, _ in ZEROS[:10]]
+        joint_limits = ksim.get_position_limits(physics_model)
+        arm_joint_limits = jnp.array([joint_limits[name] for name in arm_joint_names])
         return [
             UnifiedCommand(
                 vx_range=(-0.5, 1.5),  # m/s
@@ -1257,7 +1266,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bh_standing_range=(-0.25, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
-                arms_range=(-0.3, 0.3),  # rad
+                arms_range=0.5 * arm_joint_limits,  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
             ),
