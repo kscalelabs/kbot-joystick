@@ -1583,7 +1583,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=2.0,
             global_grad_clip=2.0,
-            entropy_coef=0.001,
+            entropy_coef=0.002,
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
