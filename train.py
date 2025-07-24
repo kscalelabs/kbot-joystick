@@ -808,7 +808,7 @@ class UnifiedCommand(ksim.Command):
     bh_standing_range: tuple[float, float] = attrs.field()
     rx_range: tuple[float, float] = attrs.field()
     ry_range: tuple[float, float] = attrs.field()
-    arms_range: Array = attrs.field()
+    arms_range: tuple[list[float], list[float]] = attrs.field()
     ctrl_dt: float = attrs.field()
     switch_prob: float = attrs.field()
 
@@ -823,7 +823,9 @@ class UnifiedCommand(ksim.Command):
         bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
-        arms = jax.random.uniform(rng_i, (10,), minval=self.arms_range[:, 0], maxval=self.arms_range[:, 1])
+        arms = jax.random.uniform(
+            rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
+        )
 
         # 50% chance to mask out 8/10 arm commands
         should_mask = jax.random.bernoulli(rng_i, p=0.5)
@@ -1022,8 +1024,8 @@ class Actor(eqx.Module):
         out_n = self.output_proj(x_n)
 
         # Split into means and stds
-        mean_n = out_n[..., :self.num_outputs]
-        std_n = out_n[..., self.num_outputs:]
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
@@ -1256,7 +1258,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
         arm_joint_names = [name for name, _, _ in ZEROS[:10]]
         joint_limits = ksim.get_position_limits(physics_model)
-        arm_joint_limits = jnp.array([joint_limits[name] for name in arm_joint_names])
+        arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return [
             UnifiedCommand(
                 vx_range=(-0.5, 1.5),  # m/s
@@ -1266,7 +1268,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bh_standing_range=(-0.25, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
-                arms_range=0.5 * arm_joint_limits,  # rad
+                arms_range=arm_joint_limits,  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
             ),
