@@ -58,10 +58,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=2,
         help="The depth for the RNN",
     )
-    num_mixtures: int = xax.field(
-        value=5,
-        help="The number of mixtures for the actor.",
-    )
     var_scale: float = xax.field(
         value=0.5,
         help="The scale for the standard deviations of the actor.",
@@ -960,7 +956,6 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.static_field()
     num_outputs: int = eqx.static_field()
-    num_mixtures: int = eqx.static_field()
     min_std: float = eqx.static_field()
     max_std: float = eqx.static_field()
     var_scale: float = eqx.static_field()
@@ -975,7 +970,6 @@ class Actor(eqx.Module):
         max_std: float,
         var_scale: float,
         hidden_size: int,
-        num_mixtures: int,
         depth: int,
     ) -> None:
         # Project input to hidden size
@@ -1000,16 +994,15 @@ class Actor(eqx.Module):
             ]
         )
 
-        # Project to output
+        # Project to output - mean and std for each action
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=num_outputs * 3 * num_mixtures,
+            out_features=num_outputs * 2,  # mean and std for each output
             key=key,
         )
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.num_mixtures = num_mixtures
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -1022,19 +1015,18 @@ class Actor(eqx.Module):
             out_carries.append(x_n)
         out_n = self.output_proj(x_n)
 
-        # Reshape the output to be a mixture of gaussians.
-        slice_len = self.num_outputs * self.num_mixtures
-        mean_nm = out_n[..., :slice_len].reshape(self.num_outputs, self.num_mixtures)
-        std_nm = out_n[..., slice_len : slice_len * 2].reshape(self.num_outputs, self.num_mixtures)
-        logits_nm = out_n[..., slice_len * 2 :].reshape(self.num_outputs, self.num_mixtures)
+        # Split into means and stds
+        mean_n = out_n[..., :self.num_outputs]
+        std_n = out_n[..., self.num_outputs:]
 
-        # Softplus and clip to ensure positive standard deviations.
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+        # Softplus and clip to ensure positive standard deviations
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
-        # Apply bias to the means.
-        mean_nm = mean_nm + jnp.array([v for _, v, _ in ZEROS])[:, None]
+        # Apply bias to the means
+        mean_n = mean_n + jnp.array([v for _, v, _ in ZEROS])
 
-        dist_n = ksim.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+        # Create diagonal gaussian distribution
+        dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
 
         return dist_n, jnp.stack(out_carries, axis=0)
 
@@ -1114,7 +1106,6 @@ class Model(eqx.Module):
         max_std: float,
         var_scale: float,
         hidden_size: int,
-        num_mixtures: int,
         depth: int,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
@@ -1126,7 +1117,6 @@ class Model(eqx.Module):
             max_std=max_std,
             var_scale=var_scale,
             hidden_size=hidden_size,
-            num_mixtures=num_mixtures,
             depth=depth,
         )
         self.critic = Critic(
@@ -1294,7 +1284,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             # KsimFeetAirTimeReward(
-            #     scale=0.3,
+            #     scale=0.05,
             #     start_reward=0.1,
             #     threshold=0.3,
             #     ctrl_dt=self.config.ctrl_dt,
@@ -1388,7 +1378,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             max_std=1.0,
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
-            num_mixtures=self.config.num_mixtures,
             depth=self.config.depth,
         )
 
@@ -1519,6 +1508,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=log_probs,
             values=value.squeeze(-1),
+            entropy=actor_dist.entropy(),
+            action_std=actor_dist.stddev(),
         )
 
         next_carry = jax.tree.map(
@@ -1583,7 +1574,7 @@ if __name__ == "__main__":
             epochs_per_log_step=1,
             rollout_length_seconds=2.0,
             global_grad_clip=2.0,
-            entropy_coef=0.004,
+            entropy_coef=0.001,
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
