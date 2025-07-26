@@ -235,7 +235,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class KsimFeetAirTimeReward(ksim.StatefulReward):
+class DenseFeetAirTimeReward(ksim.StatefulReward):
     """Reward for feet either touching or not touching the ground for some time."""
 
     threshold: float = attrs.field()
@@ -369,7 +369,7 @@ class ArmPositionReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
-        target = trajectory.command["unified_command"][..., 7:] + self.joint_biases
+        target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
         error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
         return jnp.exp(-error / self.error_scale)
 
@@ -863,6 +863,10 @@ class UnifiedCommand(ksim.Command):
         cmd = jnp.concatenate([cmd[:3], jnp.array([init_heading]), cmd[3:]])
         assert cmd.shape == (17,)
 
+        # add zero command ohe
+        is_zero_cmd = jnp.all(cmd[:3] == 0.0)
+        cmd = jnp.concatenate([cmd, jnp.array([is_zero_cmd])])
+
         return cmd
 
     def __call__(
@@ -1294,7 +1298,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            # KsimFeetAirTimeReward(
+            # DenseFeetAirTimeReward(
             #     scale=0.05,
             #     start_reward=0.1,
             #     threshold=0.3,
@@ -1354,6 +1358,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             + 1  # base height command (bh)
             + 2  # base xy orientation command (rx, ry)
             + 10  # arm commands (10)
+            + 1  # zero command ohe
         )
 
         num_actor_inputs = (
@@ -1407,7 +1412,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ang_vel_cmd = commands["unified_command"][..., 2:3]
         base_height_cmd = commands["unified_command"][..., 4:5]
         base_roll_pitch_cmd = commands["unified_command"][..., 5:7]
-        arms_cmd = commands["unified_command"][..., 7:]
+        arms_cmd = commands["unified_command"][..., 7:17]
+        zero_cmd = commands["unified_command"][..., 17:18]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
@@ -1418,6 +1424,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             base_height_cmd,  # 1
             base_roll_pitch_cmd,  # 2
             arms_cmd,  # 10
+            zero_cmd,  # 1
         ]
         if self.config.use_gyro:
             obs += [
@@ -1444,7 +1451,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ang_vel_cmd = commands["unified_command"][..., 2:3]
         base_height_cmd = commands["unified_command"][..., 3:4]
         base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
-        arms_cmd = commands["unified_command"][..., 7:]
+        arms_cmd = commands["unified_command"][..., 7:17]
+        zero_cmd = commands["unified_command"][..., 17:18]
 
         # privileged obs
         left_touch = observations["sensor_observation_left_foot_touch"]
@@ -1470,6 +1478,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_height_cmd,
                 base_roll_pitch_cmd,
                 arms_cmd,
+                zero_cmd,
                 imu_gyro_3,
                 # privileged obs:
                 left_touch,
