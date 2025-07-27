@@ -370,8 +370,9 @@ class ArmPositionReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
         target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
-        error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
-        return jnp.exp(-error / self.error_scale)
+        errors = jnp.abs(qpos_sel - target)
+        rewards = jnp.exp(-errors / self.error_scale)
+        return rewards.mean(axis=-1)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -829,7 +830,7 @@ class UnifiedCommand(ksim.Command):
             rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
         # 50% chance to sample from a tight gaussian
-        arms_gau = jax.random.normal(rng_i, (10,)) * 0.1
+        arms_gau = jax.random.normal(rng_i, (10,)) * 0.2
         arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
         arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
 
