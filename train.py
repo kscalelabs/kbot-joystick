@@ -829,7 +829,7 @@ class UnifiedCommand(ksim.Command):
             rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
         # 50% chance to sample from a tight gaussian
-        arms_gau = jax.random.normal(rng_i, (10,)) * 0.2
+        arms_gau = jax.random.normal(rng_i, (10,)) * 0.1
         arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
         arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
 
