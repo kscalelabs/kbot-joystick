@@ -823,14 +823,15 @@ class UnifiedCommand(ksim.Command):
         bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
         rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
-        arms = jax.random.uniform(
+
+        # 50% chance to sample from wide uniform distribution
+        arms_uni = jax.random.uniform(
             rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
-
-        # 50% chance to mask out 8/10 arm commands
-        should_mask = jax.random.bernoulli(rng_i, p=0.5)
-        mask_indices = jax.random.choice(rng_i, 10, shape=(8,), replace=False)
-        arms = jnp.where(should_mask & jnp.isin(jnp.arange(10), mask_indices), 0.0, arms)
+        # 50% chance to sample from a tight gaussian
+        arms_gau = jax.random.normal(rng_i, (10,)) * 0.2
+        arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
+        arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
 
         _ = jnp.zeros_like(vx)
         __ = jnp.zeros_like(arms)
@@ -839,7 +840,7 @@ class UnifiedCommand(ksim.Command):
         forward_cmd = jnp.concatenate([vx, _, _, bh, _, _, __])
         sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _, __])
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _, __])
-        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _, __])
+        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _, arms])
         stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry, arms])
         stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
@@ -882,7 +883,7 @@ class UnifiedCommand(ksim.Command):
         #     arms = prev_command[7:17]
         #     arm_mask = jnp.where(arms != 0.0, 1.0, 0.0)
         #     arms = arms + arm_mask * self.ctrl_dt * 0.5
-        #     arms = arms.clamp(self.arms_range[:, 0], self.arms_range[:, 1])
+        #     arms = arms.clip(self.arms_range[:, 0], self.arms_range[:, 1])
         #     prev_command = prev_command.at[7:17].set(arms)
         #     return prev_command
 
