@@ -532,8 +532,8 @@ class TerrainBaseHeightReward(ksim.Reward):
 
 
 @attrs.define(frozen=True)
-class FeetPositionReward(ksim.Reward):
-    """Reward for keeping the feet next to each other when standing still."""
+class StandingFeetPositionReward(ksim.Reward):
+    """Reward for keeping feet at a set distance from each other when standing still."""
 
     error_scale: float = attrs.field(default=0.25)
     stance_width: float = attrs.field(default=0.3)
@@ -1194,16 +1194,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
-            # ksim.PushEvent(
-            #     x_linvel=1.0,
-            #     y_linvel=1.0,
-            #     z_linvel=1.0,
-            #     x_angvel=0.0,
-            #     y_angvel=0.0,
-            #     z_angvel=0.0,
-            #     vel_range=(0.5, 1.5),
-            #     interval_range=(3.0, 6.0),
-            # ),
+            ksim.LinearPushEvent(
+                linvel=1.0, # BUG: this is not used in ksim actually
+                vel_range=(0.5, 1.0),
+                interval_range=(3.0, 6.0),
+            ),
         ]
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
@@ -1294,7 +1289,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ArmPositionReward.create_reward(physics_model, scale=0.1, error_scale=0.05),
             # shaping
             SingleFootContactReward(scale=0.5, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
-            FeetAirtimeReward(scale=0.8, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             # DenseFeetAirTimeReward(
             #     scale=0.05,
             #     start_reward=0.1,
@@ -1308,16 +1303,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.02,
                 error_scale=0.02,
             ),
-            # testing::
-            # FeetPositionReward.create(
-            #     physics_model=physics_model,
-            #     base_body_name="base",
-            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-            #     scale=0.02,
-            #     error_scale=0.05,
-            #     stance_width=0.30
-            # ),
+            StandingFeetPositionReward.create(
+                physics_model=physics_model,
+                base_body_name="base",
+                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                scale=0.02,
+                error_scale=0.05,
+                stance_width=0.30
+            ),
             # sim2real
             ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
             ksim.JointVelocityPenalty(scale=-0.05),
