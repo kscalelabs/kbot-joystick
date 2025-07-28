@@ -1274,7 +1274,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return [
             UnifiedCommand(
-                vx_range=(-0.5, 1.0),  # m/s
+                vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-0.7, 0.7),  # rad/s
                 bh_range=(-0.10, 0.0),  # m
