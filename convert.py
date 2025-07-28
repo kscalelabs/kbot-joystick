@@ -109,7 +109,7 @@ def main() -> None:
             jnp.where(heading_carry[1] == 0.0, initial_heading[1], heading_carry[1])
         )
 
-        cmd_zero = jnp.all(command[..., :3] == 0.0)[..., None]
+        cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
         cmd_body_height = command[..., 3:4]
