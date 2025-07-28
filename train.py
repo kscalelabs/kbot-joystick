@@ -370,9 +370,8 @@ class ArmPositionReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
         target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
-        errors = jnp.abs(qpos_sel - target)
-        rewards = jnp.exp(-errors / self.error_scale)
-        return rewards.mean(axis=-1)
+        error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
+        return jnp.exp(-error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -829,8 +828,10 @@ class UnifiedCommand(ksim.Command):
         arms_uni = jax.random.uniform(
             rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
-        # 50% chance to sample from a tight gaussian
-        arms_gau = jax.random.normal(rng_i, (10,)) * 0.2
+        # 50% chance to mask out 9/10 arm commands and have only 1 active
+        active_idx = jax.random.randint(rng_i, (), minval=0, maxval=10)
+        mask = jnp.arange(10) == active_idx
+        arms_gau = jax.random.normal(rng_i, (10,)) * 0.5 * mask
         arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
         arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
 
@@ -1287,7 +1288,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 standard_height=0.98,
                 foot_origin_height=0.06,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.1, error_scale=0.05),
+            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.05),
             # shaping
             SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
