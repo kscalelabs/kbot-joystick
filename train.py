@@ -87,6 +87,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.01,
         help="Final learning rate will be this * initial learning rate",
     )
+    mirror_loss_scale: float = xax.field(
+        value=0.01,
+        help="Scale for the mirror loss",
+    )
 
 
 # TODO put this in xax?
@@ -1212,7 +1216,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
         return [
             ksim.LinearPushEvent(
-                linvel=1.0, # BUG: this is not used in ksim actually
+                linvel=1.0,  # BUG: this is not used in ksim actually
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
@@ -1327,7 +1331,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
                 scale=0.02,
                 error_scale=0.05,
-                stance_width=0.30
+                stance_width=0.30,
             ),
             # sim2real
             ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
@@ -1508,13 +1512,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def _ppo_scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array],
+        actor_critic_carry: tuple[Array, Array, Array],
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array], ksim.PPOVariables]:
+    ) -> tuple[tuple[Array, Array, Array], ksim.PPOVariables]:
         transition, rng = xs
 
-        actor_carry, critic_carry = actor_critic_carry
+        actor_carry, critic_carry, actor_mirror_carry = actor_critic_carry
         actor_dist, next_actor_carry = self.run_actor(
             model=model.actor,
             observations=transition.obs,
@@ -1533,17 +1537,33 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry=critic_carry,
         )
 
+        # compute mirror loss
+        mirrored_actor_dist, next_actor_mirror_carry = self.run_actor(
+            model=model.actor,
+            observations=self.mirror_obs(transition.obs),
+            commands=self.mirror_cmd(transition.command),
+            carry=actor_mirror_carry,
+        )
+        unmirrored_actor_dist = self.unmirror_action(mirrored_actor_dist.mean())
+        mse_loss = jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2)
+        mirror_loss = jnp.mean(mse_loss) * self.config.mirror_loss_scale
+
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
             entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
             action_std=actor_dist.stddev(),
+            aux_losses={"mirror_loss": mirror_loss},
         )
 
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
-            self.get_initial_model_carry(model, rng),
-            (next_actor_carry, next_critic_carry),
+            (
+                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
+            ),
+            (next_actor_carry, next_critic_carry, next_actor_mirror_carry),
         )
 
         return next_carry, transition_ppo_variables
@@ -1556,13 +1576,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
         scan_fn = functools.partial(self._ppo_scan_fn, model=model)
+
+        # add a third carry for the mirror actor
+        model_carry = model_carry + (jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),)
         next_model_carry, ppo_variables = xax.scan(
             scan_fn,
             model_carry,
             (trajectory, jax.random.split(rng, len(trajectory.done))),
             jit_level=4,
         )
-        return ppo_variables, next_model_carry
+        return ppo_variables, next_model_carry[:-1]
 
     def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
         return (
@@ -1591,6 +1614,96 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(action=action_j, carry=(actor_carry, critic_carry_in))
 
+    def mirror_joints(self, j: Array) -> Array:
+        assert j.shape[0] == 20, "Joints must be 20-dimensional"
+        j_m = jnp.zeros_like(j)
+
+        # Arms (first 10 joints)
+        # Mirror right arm (0-4) to left arm positions (5-9)
+        j_m = j_m.at[0:5].set(j[5:10])
+        # Mirror left arm (5-9) to right arm positions (0-4)
+        j_m = j_m.at[5:10].set(j[0:5])
+
+        # Legs (next 10 joints)
+        # Mirror right leg (10-14) to left leg positions (15-19)
+        j_m = j_m.at[10:15].set(j[15:20])
+        # Mirror left leg (15-19) to right leg positions (10-14)
+        j_m = j_m.at[15:20].set(j[10:15])
+
+        # Negate roll and yaw angles while preserving pitch
+        # For arms: pitch=0,4,5,9; roll=1,6; yaw=2,7
+        j_m = j_m.at[1].multiply(-1)  # right shoulder roll
+        j_m = j_m.at[2].multiply(-1)  # right shoulder yaw
+        j_m = j_m.at[6].multiply(-1)  # left shoulder roll
+        j_m = j_m.at[7].multiply(-1)  # left shoulder yaw
+
+        # For legs: pitch=10,13,15,18; roll=11,16; yaw=12,17
+        j_m = j_m.at[11].multiply(-1)  # right hip roll
+        j_m = j_m.at[12].multiply(-1)  # right hip yaw
+        j_m = j_m.at[16].multiply(-1)  # left hip roll
+        j_m = j_m.at[17].multiply(-1)  # left hip yaw
+
+        return j_m
+
+    def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
+        # only mirror obs the actor takes as input
+        joint_pos_n_m = self.mirror_joints(obs["joint_position_observation"])
+        joint_vel_n_m = self.mirror_joints(obs["joint_velocity_observation"])
+        imu_quat_4_m = jnp.concatenate(
+            [
+                obs["imu_orientation_observation"][..., :1],
+                -obs["imu_orientation_observation"][..., 1:2],
+                obs["imu_orientation_observation"][..., 2:3],
+                -obs["imu_orientation_observation"][..., 3:],
+            ],
+            axis=-1,
+        )
+        imu_gyro_3_m = jnp.concatenate(
+            [
+                -obs["sensor_observation_imu_gyro"][..., 0:1],
+                obs["sensor_observation_imu_gyro"][..., 1:2],
+                -obs["sensor_observation_imu_gyro"][..., 2:3],
+            ],
+            axis=-1,
+        )
+
+        obs_m = {
+            "joint_position_observation": joint_pos_n_m,
+            "joint_velocity_observation": joint_vel_n_m,
+            "imu_orientation_observation": imu_quat_4_m,
+            "sensor_observation_imu_gyro": imu_gyro_3_m,
+        }
+        return obs_m
+
+    def mirror_cmd(self, cmd: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
+        cmd_u = cmd["unified_command"]
+        cmd_u_m = jnp.concatenate(
+            [
+                cmd_u[..., :1],  # x
+                -cmd_u[..., 1:2],  # y
+                -cmd_u[..., 2:3],  # z
+                -cmd_u[..., 3:4],  # heading carry
+                cmd_u[..., 4:5],  # base height
+                -cmd_u[..., 5:6],  # base roll
+                cmd_u[..., 6:7],  # base pitch
+                self.mirror_joints(
+                    jnp.concatenate(
+                        [
+                            cmd_u[..., 7:17],
+                            jnp.zeros(shape=(10,)),
+                        ]
+                    )
+                )[..., :10],  # arms
+            ],
+            axis=-1,
+        )
+        cmd = {"unified_command": cmd_u_m}
+        return cmd
+
+    def unmirror_action(self, action: ksim.Action) -> ksim.Action:
+        action_m = self.mirror_joints(action)
+        return action_m
+
 
 if __name__ == "__main__":
     HumanoidWalkingTask.launch(
@@ -1606,6 +1719,7 @@ if __name__ == "__main__":
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
+            mirror_loss_scale=0.01,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
