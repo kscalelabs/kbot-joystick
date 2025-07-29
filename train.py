@@ -229,98 +229,13 @@ class FeetAirtimeReward(ksim.StatefulReward):
         left_feet_airtime_reward = (left_air_shifted - self.touchdown_penalty) * td_l.astype(jnp.float32)
         right_feet_airtime_reward = (right_air_shifted - self.touchdown_penalty) * td_r.astype(jnp.float32)
 
-        reward = left_feet_airtime_reward + right_feet_airtime_reward
+        reward = jnp.minimum(left_feet_airtime_reward + right_feet_airtime_reward, 0.0)
 
         # standing mask
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, reward)
 
         return reward, reward_carry
-
-
-@attrs.define(frozen=True, kw_only=True)
-class DenseFeetAirTimeReward(ksim.StatefulReward):
-    """Reward for feet either touching or not touching the ground for some time."""
-
-    threshold: float = attrs.field()
-    ctrl_dt: float = attrs.field()
-    num_feet: int = attrs.field(default=2)
-    start_reward: float = attrs.field(
-        default=0.1,
-        validator=attrs.validators.and_(
-            attrs.validators.ge(0.0),
-            attrs.validators.le(1.0),
-        ),
-    )
-
-    def initial_carry(self, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (jnp.zeros(self.num_feet, dtype=jnp.int32), jnp.zeros(self.num_feet, dtype=jnp.int32))
-
-    def get_reward_stateful(
-        self,
-        trajectory: ksim.Trajectory,
-        reward_carry: tuple[Array, Array],
-    ) -> tuple[Array, tuple[Array, Array]]:
-        left_contact = trajectory.obs["sensor_observation_left_foot_touch"] > 0.1
-        right_contact = trajectory.obs["sensor_observation_right_foot_touch"] > 0.1
-        sensor_data_tn = jnp.stack([left_contact[:, 0], right_contact[:, 0]], axis=-1)
-
-        threshold_steps = round(self.threshold / self.ctrl_dt)
-
-        def scan_fn(carry: tuple[Array, Array], x: tuple[Array, Array]) -> tuple[tuple[Array, Array], Array]:
-            count_n, cooldown_n = carry
-            contact_n, done = x
-
-            # The logic for this algorithm is to reward the agent for having
-            # some foot off the ground for up to `threshold_steps` steps, but
-            # then don't reward it for some cooldown period after that.
-            on_cooldown = cooldown_n > 0
-
-            cooldown_n = jnp.where(
-                done,
-                0,
-                jnp.where(
-                    on_cooldown,
-                    cooldown_n - 1,
-                    jnp.where(
-                        contact_n & (count_n > 0),
-                        jnp.minimum(count_n, threshold_steps),
-                        0,
-                    ),
-                ),
-            )
-
-            count_n = jnp.where(
-                done,
-                0,
-                jnp.where(
-                    on_cooldown,
-                    0,
-                    jnp.where(
-                        contact_n,
-                        0,
-                        count_n + 1,
-                    ),
-                ),
-            )
-
-            return (count_n, cooldown_n), count_n
-
-        reward_carry, count_tn = xax.scan(scan_fn, reward_carry, (sensor_data_tn, trajectory.done))
-
-        # Slight upward slope as the steps get longer. Make sure that the
-        # average value will be 1 after taking a full step.
-        reward_tn = (count_tn.astype(jnp.float32) / threshold_steps) * (2.0 - self.start_reward * 2) + self.start_reward
-
-        # Gradually increase reward until `threshold_steps`.
-        reward_tn = jnp.where((count_tn > 0) & (count_tn < threshold_steps), reward_tn, 0.0)
-        reward_t = reward_tn.max(axis=-1)
-
-        # quickly hacking in zero command disabling. TODO needs tuning
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward_t = jnp.where(is_zero_cmd, 0.0, reward_t)
-
-        return reward_t, reward_carry
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -375,24 +290,6 @@ class ArmPositionReward(ksim.Reward):
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
         target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
         error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
-        return jnp.exp(-error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class ActionVelocityReward(ksim.Reward):
-    """Reward for first derivative change in consecutive actions."""
-
-    error_scale: float = attrs.field(default=0.25)
-    norm: xax.NormType = attrs.field(default="l2")
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        actions = trajectory.action
-        actions_zp = jnp.pad(actions, ((1, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, (1, 0), mode="edge")[:-1][:, None]
-        actions_vel = jnp.where(done, 0.0, actions_zp[1:] - actions_zp[:-1])
-        error = xax.get_norm(actions_vel, self.norm).mean(axis=-1)
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        error = jnp.where(is_zero_cmd, error, error**2)
         return jnp.exp(-error / self.error_scale)
 
 
@@ -1311,12 +1208,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # shaping
             SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=0.15),
             FeetAirtimeReward(scale=1.0, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            # DenseFeetAirTimeReward(
-            #     scale=0.05,
-            #     start_reward=0.1,
-            #     threshold=0.3,
-            #     ctrl_dt=self.config.ctrl_dt,
-            # ),
             FeetOrientationReward.create(
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
@@ -1324,17 +1215,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.02,
                 error_scale=0.02,
             ),
-            StandingFeetPositionReward.create(
-                physics_model=physics_model,
-                base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-                scale=0.02,
-                error_scale=0.05,
-                stance_width=0.30,
-            ),
+            # StandingFeetPositionReward.create(
+            #     physics_model=physics_model,
+            #     base_body_name="base",
+            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
+            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+            #     scale=0.02,
+            #     error_scale=0.05,
+            #     stance_width=0.30,
+            # ),
             # sim2real
-            ActionVelocityReward(scale=0.01, error_scale=0.02, norm="l1"),
+            ksim.ActionVelocityPenalty(scale=-0.05),
             ksim.JointVelocityPenalty(scale=-0.05),
             ksim.JointAccelerationPenalty(scale=-0.05),
             ksim.CtrlPenalty(scale=-0.00001),
