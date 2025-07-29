@@ -950,7 +950,8 @@ class Actor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means
-        mean_n = mean_n + jnp.array([v for _, v, _ in ZEROS])
+        arm_cmd_bias = jnp.concatenate([jnp.zeros(shape=(10,)), obs_n[..., -10:]], axis=-1)
+        mean_n = mean_n + jnp.array([v for _, v, _ in ZEROS]) + arm_cmd_bias
 
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
