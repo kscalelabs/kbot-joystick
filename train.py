@@ -1168,6 +1168,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 bias_euler=(0.05, 0.05, 0.0),  # roll, pitch, yaw
                 noise=math.radians(1),
             ),
+            ksim.ProjectedGravityObservation.create(
+                physics_model=physics_model,
+                framequat_name="imu_site_quat",
+                lag_range=(0.0, 0.1),
+                noise=math.radians(1),
+                bias=math.radians(2),
+            ),
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
@@ -1267,7 +1274,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            + 4  # imu quat
+            # + 4  # imu quat
+            + 3  # projected gravity
             + num_commands
             + (3 if self.config.use_gyro else 0)  # imu_gyro
         )
@@ -1275,6 +1283,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
             + 4  # imu quat
+            + 3  # projected gravity
             + num_commands
             + 3  # imu gyro
             + 2  # feet touch
@@ -1310,7 +1319,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[distrax.Distribution, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        imu_quat_4 = observations["imu_orientation_observation"]
+        # imu_quat_4 = observations["imu_orientation_observation"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
         lin_vel_cmd = commands["unified_command"][..., :2]
@@ -1322,7 +1332,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
-            imu_quat_4,  # 4
+            # imu_quat_4,  # 4
+            projected_gravity_3,  # 3
             zero_cmd,  # 1
             lin_vel_cmd,  # 2
             ang_vel_cmd,  # 1
@@ -1350,6 +1361,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         qpos_n = observations["qpos_observation"]
         qvel_n = observations["qvel_observation"]
         imu_quat_4 = observations["imu_orientation_observation"]
+        projected_gravity_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
         lin_vel_cmd = commands["unified_command"][..., :2]
@@ -1377,6 +1389,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 qpos_n,
                 qvel_n / 10.0,
                 imu_quat_4,
+                projected_gravity_3,
                 zero_cmd,
                 lin_vel_cmd,
                 ang_vel_cmd,
