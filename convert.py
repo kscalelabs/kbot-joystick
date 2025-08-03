@@ -92,22 +92,13 @@ def main() -> None:
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        quaternion: Array,  # imu quat
         command: Array,
+        projected_gravity: Array,
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
         heading_carry = carry[0][0] # (h,)
         model_carry = carry[1:] # (l, 2 or 1, h)
-
-        # initialize heading if first step. use heading[1] == 1.0 to record if we have already initialized.
-        initial_heading = jnp.array([xax.quat_to_euler(quaternion)[2], 1.0])
-        heading_carry = heading_carry.at[0].set(
-            jnp.where(heading_carry[1] == 0.0, initial_heading[0], heading_carry[0])
-        )
-        heading_carry = heading_carry.at[1].set(
-            jnp.where(heading_carry[1] == 0.0, initial_heading[1], heading_carry[1])
-        )
 
         cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
         cmd_vel = command[..., :2]
@@ -116,21 +107,12 @@ def main() -> None:
         cmd_body_orientation = command[..., 4:6]
         cmd_arms = command[..., 6:]
 
-        # update heading based on yaw rate command
-        heading = heading_carry[0] + cmd_yaw_rate * 0.02  # TODO hardcoding dt for now
-        heading_carry = heading_carry.at[0].set(heading.squeeze())
-
-        heading_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading.squeeze()]))
-        backspun_quat = rotate_quat_by_quat(quaternion, heading_quat, inverse=True)
-
-        # ensure positive w component
-        positive_backspun_quat = jnp.where(backspun_quat[..., 0] < 0, -backspun_quat, backspun_quat)
 
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
-                positive_backspun_quat,
+                projected_gravity,
                 cmd_zero,
                 cmd_vel,
                 cmd_yaw_rate,
