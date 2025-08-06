@@ -50,6 +50,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
 
     # Model parameters.
+    model_type: str = xax.field(
+        value="lstm",
+        help="The type of model to use.",
+    )
     hidden_size: int = xax.field(
         value=128,
         help="The hidden size for the RNN.",
@@ -879,7 +883,7 @@ class Actor(eqx.Module):
     """Actor for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
+    rnns: tuple[eqx.nn.GRUCell | eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.static_field()
     num_outputs: int = eqx.static_field()
@@ -891,6 +895,7 @@ class Actor(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        model_type: str,
         num_inputs: int,
         num_outputs: int,
         min_std: float,
@@ -910,13 +915,14 @@ class Actor(eqx.Module):
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
         rnn_keys = jax.random.split(rnn_key, depth)
+        recurrent_cell = eqx.nn.LSTMCell if model_type == "lstm" else eqx.nn.GRUCell
         self.rnns = tuple(
             [
-                eqx.nn.GRUCell(
+                recurrent_cell(
                     input_size=hidden_size,
                     hidden_size=hidden_size,
                     key=rnn_key,
-                )
+                ) 
                 for rnn_key in rnn_keys
             ]
         )
@@ -934,12 +940,15 @@ class Actor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[distrax.Distribution, Array]:
+    def forward(self, obs_n: Array, carry: tuple[Array, ...]) -> tuple[distrax.Distribution, tuple[Array, ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
+            carry_i = carry[i][0] if len(carry[i]) == 1 else carry[i]
+            x_n = rnn(x_n, carry_i)
+            out_carries.append(x_n if isinstance(x_n, tuple) else (x_n,))
+            if isinstance(x_n, tuple):
+                x_n, _ = x_n # gru returns h only. lstm returns (h, c). we want h. 
         out_n = self.output_proj(x_n)
 
         # Split into means and stds
@@ -956,14 +965,14 @@ class Actor(eqx.Module):
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
 
-        return dist_n, jnp.stack(out_carries, axis=0)
+        return dist_n, tuple(out_carries)
 
 
 class Critic(eqx.Module):
     """Critic for the walking task."""
 
     input_proj: eqx.nn.Linear
-    rnns: tuple[eqx.nn.GRUCell, ...]
+    rnns: tuple[eqx.nn.GRUCell | eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.static_field()
 
@@ -971,6 +980,7 @@ class Critic(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        model_type: str,
         num_inputs: int,
         hidden_size: int,
         depth: int,
@@ -988,9 +998,10 @@ class Critic(eqx.Module):
         # Create RNN layer
         key, rnn_key = jax.random.split(key)
         rnn_keys = jax.random.split(rnn_key, depth)
+        recurrent_cell = eqx.nn.LSTMCell if model_type == "lstm" else eqx.nn.GRUCell
         self.rnns = tuple(
             [
-                eqx.nn.GRUCell(
+                recurrent_cell(
                     input_size=hidden_size,
                     hidden_size=hidden_size,
                     key=rnn_key,
@@ -1008,15 +1019,18 @@ class Critic(eqx.Module):
 
         self.num_inputs = num_inputs
 
-    def forward(self, obs_n: Array, carry: Array) -> tuple[Array, Array]:
+    def forward(self, obs_n: Array, carry: tuple[Array, ...]) -> tuple[Array, tuple[Array, ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
-            x_n = rnn(x_n, carry[i])
-            out_carries.append(x_n)
+            carry_i = carry[i][0] if len(carry[i]) == 1 else carry[i]
+            x_n = rnn(x_n, carry_i)
+            out_carries.append(x_n if isinstance(x_n, tuple) else (x_n,))
+            if isinstance(x_n, tuple):
+                x_n, _ = x_n # gru returns h only. lstm returns (h, c). we want h. 
         out_n = self.output_proj(x_n)
 
-        return out_n, jnp.stack(out_carries, axis=0)
+        return out_n, tuple(out_carries)
 
 
 class Model(eqx.Module):
@@ -1027,6 +1041,7 @@ class Model(eqx.Module):
         self,
         key: PRNGKeyArray,
         *,
+        model_type: str,
         num_actor_inputs: int,
         num_actor_outputs: int,
         num_critic_inputs: int,
@@ -1039,6 +1054,7 @@ class Model(eqx.Module):
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
             actor_key,
+            model_type=model_type,
             num_inputs=num_actor_inputs,
             num_outputs=num_actor_outputs,
             min_std=min_std,
@@ -1049,6 +1065,7 @@ class Model(eqx.Module):
         )
         self.critic = Critic(
             critic_key,
+            model_type=model_type,
             hidden_size=hidden_size,
             depth=depth,
             num_inputs=num_critic_inputs,
@@ -1291,6 +1308,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         return Model(
             key,
+            model_type=self.config.model_type,
             num_actor_inputs=num_actor_inputs,
             num_actor_outputs=len(ZEROS),
             num_critic_inputs=num_critic_inputs,
@@ -1448,13 +1466,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             aux_losses={"mirror_loss": mirror_loss},
         )
 
+        initial_carry = self.get_initial_model_carry(None, None)
+        initial_mirror_carry = jax.tree.map(lambda x: jnp.zeros_like(x), initial_carry[0])
+        initial_carry = initial_carry + (initial_mirror_carry,)
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
-            (
-                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-                jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            ),
+            initial_carry,
             (next_actor_carry, next_critic_carry, next_actor_mirror_carry),
         )
 
@@ -1464,13 +1481,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         self,
         model: Model,
         trajectory: ksim.Trajectory,
-        model_carry: tuple[Array, Array],
+        model_carry: tuple[tuple[tuple[Array, ...], ...], tuple[tuple[Array, ...], ...]],
         rng: PRNGKeyArray,
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
         scan_fn = functools.partial(self._ppo_scan_fn, model=model)
 
         # add a third carry for the mirror actor
-        model_carry = model_carry + (jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),)
+        actor_mirror_carry = jax.tree.map(lambda x: jnp.zeros_like(x), model_carry[0])
+        # TODO sum the actor carry to check if its initted raw or carried over like it should
+        model_carry = model_carry + (actor_mirror_carry,)
+        assert len(model_carry) == 3, "Model carry should have 3 elements"
         next_model_carry, ppo_variables = xax.scan(
             scan_fn,
             model_carry,
@@ -1480,10 +1500,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ppo_variables, next_model_carry[:-1]
 
     def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
-        return (
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-            jnp.zeros(shape=(self.config.depth, self.config.hidden_size)),
-        )
+        if self.config.model_type == "gru":
+            return (
+                tuple((jnp.zeros(shape=(self.config.hidden_size)),) for _ in range(self.config.depth)),
+                tuple((jnp.zeros(shape=(self.config.hidden_size)),) for _ in range(self.config.depth)),
+            )
+        elif self.config.model_type == "lstm":
+            return (
+                tuple((jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size))) for _ in range(self.config.depth)),
+                tuple((jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size))) for _ in range(self.config.depth)),
+            )
 
     def sample_action(
         self,
