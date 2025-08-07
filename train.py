@@ -1522,18 +1522,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # Mirror left leg (15-19) to right leg positions (10-14)
         j_m = j_m.at[15:20].set(j[10:15])
 
-        # Negate roll and yaw angles while preserving pitch
-        # For arms: pitch=0,4,5,9; roll=1,6; yaw=2,7
-        j_m = j_m.at[1].multiply(-1)  # right shoulder roll
-        j_m = j_m.at[2].multiply(-1)  # right shoulder yaw
-        j_m = j_m.at[6].multiply(-1)  # left shoulder roll
-        j_m = j_m.at[7].multiply(-1)  # left shoulder yaw
-
-        # For legs: pitch=10,13,15,18; roll=11,16; yaw=12,17
-        j_m = j_m.at[11].multiply(-1)  # right hip roll
-        j_m = j_m.at[12].multiply(-1)  # right hip yaw
-        j_m = j_m.at[16].multiply(-1)  # left hip roll
-        j_m = j_m.at[17].multiply(-1)  # left hip yaw
+        # Negate every joint angle
+        j_m = -j_m
 
         return j_m
 
