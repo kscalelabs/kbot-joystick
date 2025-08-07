@@ -75,7 +75,7 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth + 1, task.config.hidden_size)  # +1 to hack in a tensor for heading carry
+    carry_shape = (task.config.depth + 1, 2, task.config.hidden_size)  # +1 to hack in a tensor for heading carry
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
@@ -97,8 +97,8 @@ def main() -> None:
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        heading_carry = carry[0]
-        model_carry = carry[1:]
+        heading_carry = carry[0][0] # (h,)
+        model_carry = carry[1:] # (l, 2 or 1, h)
 
         # initialize heading if first step. use heading[1] == 1.0 to record if we have already initialized.
         initial_heading = jnp.array([xax.quat_to_euler(quaternion)[2], 1.0])
@@ -141,8 +141,15 @@ def main() -> None:
             ],
             axis=-1,
         )
-        dist, model_carry = model.actor.forward(obs, model_carry)
-        carry = jnp.concatenate([heading_carry[None, :], model_carry], axis=0)
+        dist, model_carry = model.actor.forward(obs, model_carry) # TODO can feed array instead of tuple? - apparently yes
+
+        # Convert tuple of tuples of arrays into a single array by stacking twice
+        model_carry = jnp.stack([jnp.stack(inner_tuple, axis=0) for inner_tuple in model_carry], axis=0)
+
+        hc = jnp.zeros_like(model_carry[0])[None, :]
+        hc.at[0, 0].set(heading_carry)
+
+        carry = jnp.concatenate([hc, model_carry], axis=0)
         return dist.mode(), carry
 
     init_onnx = export_fn(
