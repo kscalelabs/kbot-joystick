@@ -33,7 +33,7 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth, 2, task.config.hidden_size)
+    carry_shape = (task.config.depth, 2, task.config.hidden_size) # TODO carry broken for gru
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
