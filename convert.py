@@ -6,7 +6,6 @@ from pathlib import Path
 import jax
 import jax.numpy as jnp
 import ksim
-import xax
 from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
