@@ -611,111 +611,6 @@ class QvelObservation(ksim.Observation):
         return state.physics_state.data.qvel[6:]
 
 
-@attrs.define(frozen=True, kw_only=True)
-class ImuOrientationObservation(ksim.StatefulObservation):
-    """Observes the IMU orientation, back spun in yaw heading, as commanded.
-
-    This provides an approximation of reading the IMU orientation from
-    the IMU on the physical robot, backspun by commanded heading. The `framequat_name` should be the name of
-    the framequat sensor attached to the IMU.
-
-    Example: if yaw cmd = 3.14, and IMU reading is [0, 0, 0, 1], then back spun IMU heading obs is [1, 0, 0, 0]
-
-    The policy learns to keep the IMU heading obs around [1, 0, 0, 0].
-    """
-
-    framequat_idx_range: tuple[int, int | None] = attrs.field()
-    lag_range: tuple[float, float] = attrs.field(
-        default=(0.01, 0.1),
-        validator=attrs.validators.deep_iterable(
-            attrs.validators.and_(
-                attrs.validators.ge(0.0),
-                attrs.validators.lt(1.0),
-            ),
-        ),
-    )
-    bias_euler: tuple[float, float, float] = attrs.field(
-        default=(0.0, 0.0, 0.0),
-        validator=attrs.validators.deep_iterable(
-            attrs.validators.and_(
-                attrs.validators.ge(0.0),
-                attrs.validators.le(math.pi),
-            ),
-        ),
-    )
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        physics_model: ksim.PhysicsModel,
-        noise: float = 0.0,
-        framequat_name: str,
-        lag_range: tuple[float, float] = (0.01, 0.1),
-        bias_euler: tuple[float, float, float] = (0.0, 0.0, 0.0),
-    ) -> Self:
-        """Create an IMU orientation observation from a physics model.
-
-        Args:
-            physics_model: MuJoCo physics model
-            framequat_name: The name of the framequat sensor
-            lag_range: The range of EMA factors to use, to approximate the
-                variation in the amount of smoothing of the Kalman filter.
-            noise: The observation noise
-            bias_euler: The bias in euler angles, in roll, pitch, yaw.
-        """
-        sensor_name_to_idx_range = ksim.get_sensor_data_idxs_by_name(physics_model)
-        if framequat_name not in sensor_name_to_idx_range:
-            options = "\n".join(sorted(sensor_name_to_idx_range.keys()))
-            raise ValueError(f"{framequat_name} not found in model. Available:\n{options}")
-
-        return cls(
-            framequat_idx_range=sensor_name_to_idx_range[framequat_name],
-            lag_range=lag_range,
-            bias_euler=bias_euler,
-            noise=noise,
-        )
-
-    def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> tuple[Array, Array, Array]:
-        lrng, brng = jax.random.split(rng, 2)
-        minval, maxval = self.lag_range
-        lag = jax.random.uniform(lrng, (1,), minval=minval, maxval=maxval)
-
-        bias_range = jnp.array(self.bias_euler)
-        bias = jax.random.uniform(brng, (3,), minval=-bias_range, maxval=bias_range)
-        bias_quat = xax.euler_to_quat(bias)
-
-        return jnp.zeros((4,)), lag, bias_quat
-
-    def observe_stateful(
-        self,
-        state: ksim.ObservationInput,
-        curriculum_level: Array,
-        rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array, Array]]:
-        x, lag, bias = state.obs_carry
-
-        framequat_start, framequat_end = self.framequat_idx_range
-        framequat_data = state.physics_state.data.sensordata[framequat_start:framequat_end].ravel()
-
-        # apply bias noise
-        framequat_data = rotate_quat_by_quat(framequat_data, bias)
-
-        # get heading cmd
-        heading_yaw_cmd = state.commands["unified_command"][3]
-
-        # spin back
-        heading_yaw_cmd_quat = xax.euler_to_quat(jnp.array([0.0, 0.0, heading_yaw_cmd]))
-        backspun_framequat = rotate_quat_by_quat(framequat_data, heading_yaw_cmd_quat, inverse=True)
-        # ensure positive quat hemisphere
-        backspun_framequat = jnp.where(backspun_framequat[..., 0] < 0, -backspun_framequat, backspun_framequat)
-
-        # Get current Kalman filter state
-        x = x * lag + backspun_framequat * (1 - lag)
-
-        return x, (x, lag, bias)
-
-
 @attrs.define(frozen=True)
 class UnifiedCommand(ksim.Command):
     """Unifiying all commands into one to allow for covariance control."""
@@ -1177,13 +1072,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
             ),
             BaseHeightObservation(),
-            ImuOrientationObservation.create(
-                physics_model=physics_model,
-                framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.1),
-                bias_euler=(0.05, 0.05, 0.0),  # roll, pitch, yaw
-                noise=math.radians(1),
-            ),
             ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
