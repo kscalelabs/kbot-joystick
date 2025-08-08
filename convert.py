@@ -17,47 +17,6 @@ from train import HumanoidWalkingTask, Model
 NUM_COMMANDS_MODEL = 16
 
 
-def rotate_quat_by_quat(quat_to_rotate: Array, rotating_quat: Array, inverse: bool = False, eps: float = 1e-6) -> Array:
-    """Rotates one quaternion by another quaternion through quaternion multiplication.
-
-    This performs the operation: rotating_quat * quat_to_rotate * rotating_quat^(-1) if inverse=False
-    or rotating_quat^(-1) * quat_to_rotate * rotating_quat if inverse=True
-
-    Args:
-        quat_to_rotate: The quaternion being rotated (w,x,y,z), shape (*, 4)
-        rotating_quat: The quaternion performing the rotation (w,x,y,z), shape (*, 4)
-        inverse: If True, rotate by the inverse of rotating_quat
-        eps: Small epsilon value to avoid division by zero in normalization
-
-    Returns:
-        The rotated quaternion (w,x,y,z), shape (*, 4)
-    """
-    # Normalize both quaternions
-    quat_to_rotate = quat_to_rotate / (jnp.linalg.norm(quat_to_rotate, axis=-1, keepdims=True) + eps)
-    rotating_quat = rotating_quat / (jnp.linalg.norm(rotating_quat, axis=-1, keepdims=True) + eps)
-
-    # If inverse requested, conjugate the rotating quaternion (negate x,y,z components)
-    if inverse:
-        w_part = rotating_quat[..., :1]  # w component
-        xyz_part = -rotating_quat[..., 1:]  # negate x,y,z components
-        rotating_quat = jnp.concatenate([w_part, xyz_part], axis=-1)
-
-    # Extract components of both quaternions
-    w1, x1, y1, z1 = jnp.split(rotating_quat, 4, axis=-1)  # rotating quaternion
-    w2, x2, y2, z2 = jnp.split(quat_to_rotate, 4, axis=-1)  # quaternion being rotated
-
-    # Quaternion multiplication formula
-    w = w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2
-    x = w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2
-    y = w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2
-    z = w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2
-
-    result = jnp.concatenate([w, x, y, z], axis=-1)
-
-    # Normalize result
-    return result / (jnp.linalg.norm(result, axis=-1, keepdims=True) + eps)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint_path", type=str)
@@ -75,7 +34,7 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth + 1, 2, task.config.hidden_size)  # +1 to hack in a tensor for heading carry
+    carry_shape = (task.config.depth, 2, task.config.hidden_size)
     num_commands = NUM_COMMANDS_MODEL
 
     metadata = PyModelMetadata(
@@ -97,16 +56,12 @@ def main() -> None:
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        heading_carry = carry[0][0] # (h,)
-        model_carry = carry[1:] # (l, 2 or 1, h)
-
         cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
         cmd_body_height = command[..., 3:4]
         cmd_body_orientation = command[..., 4:6]
         cmd_arms = command[..., 6:]
-
 
         obs = jnp.concatenate(
             [
@@ -123,15 +78,7 @@ def main() -> None:
             ],
             axis=-1,
         )
-        dist, model_carry = model.actor.forward(obs, model_carry) # TODO can feed array instead of tuple? - apparently yes
-
-        # Convert tuple of tuples of arrays into a single array by stacking twice
-        model_carry = jnp.stack([jnp.stack(inner_tuple, axis=0) for inner_tuple in model_carry], axis=0)
-
-        hc = jnp.zeros_like(model_carry[0])[None, :]
-        hc.at[0, 0].set(heading_carry)
-
-        carry = jnp.concatenate([hc, model_carry], axis=0)
+        dist, carry = model.actor.forward(obs, carry)
         return dist.mode(), carry
 
     init_onnx = export_fn(
