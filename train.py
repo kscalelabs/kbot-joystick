@@ -816,7 +816,7 @@ class Actor(eqx.Module):
                     input_size=hidden_size,
                     hidden_size=hidden_size,
                     key=rnn_key,
-                ) 
+                )
                 for rnn_key in rnn_keys
             ]
         )
@@ -842,7 +842,7 @@ class Actor(eqx.Module):
             x_n = rnn(x_n, carry_i)
             out_carries.append(x_n if isinstance(x_n, tuple) else (x_n,))
             if isinstance(x_n, tuple):
-                x_n, _ = x_n # gru returns h only. lstm returns (h, c). we want h. 
+                x_n, _ = x_n  # gru returns h only. lstm returns (h, c). we want h.
         out_n = self.output_proj(x_n)
 
         # Split into means and stds
@@ -921,7 +921,7 @@ class Critic(eqx.Module):
             x_n = rnn(x_n, carry_i)
             out_carries.append(x_n if isinstance(x_n, tuple) else (x_n,))
             if isinstance(x_n, tuple):
-                x_n, _ = x_n # gru returns h only. lstm returns (h, c). we want h. 
+                x_n, _ = x_n  # gru returns h only. lstm returns (h, c). we want h.
         out_n = self.output_proj(x_n)
 
         return out_n, tuple(out_carries)
@@ -1400,8 +1400,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             )
         elif self.config.model_type == "lstm":
             return (
-                tuple((jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size))) for _ in range(self.config.depth)),
-                tuple((jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size))) for _ in range(self.config.depth)),
+                tuple(
+                    (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+                    for _ in range(self.config.depth)
+                ),
+                tuple(
+                    (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+                    for _ in range(self.config.depth)
+                ),
             )
 
     def sample_action(
