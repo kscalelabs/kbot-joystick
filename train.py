@@ -1282,7 +1282,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
-            + 4  # imu quat
             + 3  # projected gravity
             + num_commands
             + 3  # imu gyro
@@ -1319,7 +1318,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[distrax.Distribution, Array]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
-        # imu_quat_4 = observations["imu_orientation_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
@@ -1332,7 +1330,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
-            # imu_quat_4,  # 4
             projected_gravity_3,  # 3
             zero_cmd,  # 1
             lin_vel_cmd,  # 2
@@ -1360,7 +1357,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[Array, Array]:
         qpos_n = observations["qpos_observation"]
         qvel_n = observations["qvel_observation"]
-        imu_quat_4 = observations["imu_orientation_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
         imu_gyro_3 = observations["sensor_observation_imu_gyro"]
         zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
@@ -1388,7 +1384,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 # actor obs:
                 qpos_n,
                 qvel_n / 10.0,
-                imu_quat_4,
                 projected_gravity_3,
                 zero_cmd,
                 lin_vel_cmd,
@@ -1544,15 +1539,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # only mirror obs the actor takes as input
         joint_pos_n_m = self.mirror_joints(obs["joint_position_observation"])
         joint_vel_n_m = self.mirror_joints(obs["joint_velocity_observation"])
-        imu_quat_4_m = jnp.concatenate(
-            [
-                obs["imu_orientation_observation"][..., :1],
-                -obs["imu_orientation_observation"][..., 1:2],
-                obs["imu_orientation_observation"][..., 2:3],
-                -obs["imu_orientation_observation"][..., 3:],
-            ],
-            axis=-1,
-        )
         imu_gyro_3_m = jnp.concatenate(
             [
                 -obs["sensor_observation_imu_gyro"][..., 0:1],
@@ -1573,7 +1559,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs_m = {
             "joint_position_observation": joint_pos_n_m,
             "joint_velocity_observation": joint_vel_n_m,
-            "imu_orientation_observation": imu_quat_4_m,
             "sensor_observation_imu_gyro": imu_gyro_3_m,
             "projected_gravity_observation": projected_gravity_3_m,
         }
