@@ -1579,12 +1579,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             axis=-1,
         )
 
-        obs_m = xax.FrozenDict({
-            "joint_position_observation": joint_pos_n_m,
-            "joint_velocity_observation": joint_vel_n_m,
-            "sensor_observation_imu_gyro": imu_gyro_3_m,
-            "projected_gravity_observation": projected_gravity_3_m,
-        })
+        obs_m = xax.FrozenDict(
+            {
+                "joint_position_observation": joint_pos_n_m,
+                "joint_velocity_observation": joint_vel_n_m,
+                "sensor_observation_imu_gyro": imu_gyro_3_m,
+                "projected_gravity_observation": projected_gravity_3_m,
+            }
+        )
         return obs_m
 
     def mirror_cmd(self, cmd: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
