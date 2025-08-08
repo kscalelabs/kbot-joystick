@@ -1627,6 +1627,8 @@ if __name__ == "__main__":
             gamma=0.9,
             lam=0.94,
             mirror_loss_scale=0.01,
+            model_type="lstm",
+            hidden_size=256,
             # Simulation parameters.
             dt=0.002,
             ctrl_dt=0.02,
