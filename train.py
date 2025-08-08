@@ -1089,7 +1089,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             UnifiedCommand(
                 vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
-                wz_range=(-0.7, 0.7),  # rad/s
+                wz_range=(-1.0, 1.0),  # rad/s
                 bh_range=(-0.10, 0.0),  # m
                 bh_standing_range=(-0.25, 0.0),  # m
                 rx_range=(-0.3, 0.3),  # rad
