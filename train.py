@@ -497,7 +497,6 @@ class StandingFeetPositionReward(ksim.Reward):
 class FeetOrientationReward(ksim.Reward):
     """Reward for keeping feet pitch and roll oriented parallel to the ground."""
 
-    scale: float = attrs.field(default=1.0)
     error_scale: float = attrs.field(default=0.25)
     foot_left_idx: int = attrs.field(default=0)
     foot_right_idx: int = attrs.field(default=0)
@@ -693,7 +692,7 @@ class ImuOrientationObservation(ksim.StatefulObservation):
         state: ksim.ObservationInput,
         curriculum_level: Array,
         rng: PRNGKeyArray,
-    ) -> tuple[Array, tuple[Array, Array]]:
+    ) -> tuple[Array, tuple[Array, Array, Array]]:
         x, lag, bias = state.obs_carry
 
         framequat_start, framequat_end = self.framequat_idx_range
@@ -860,7 +859,7 @@ class TerrainBadZTermination(ksim.Termination):
 
 @attrs.define(frozen=True, kw_only=True)
 class PlaneXYPositionReset(ksim.Reset):
-    """Resets the robot's XY position"""
+    """Resets the robot's XY position."""
 
     x_range: float = attrs.field(default=1.0)
     y_range: float = attrs.field(default=1.0)
@@ -871,7 +870,7 @@ class PlaneXYPositionReset(ksim.Reset):
         new_y = jax.random.uniform(keyy, (1,), minval=-self.y_range, maxval=self.y_range)
 
         qpos_j = data.qpos
-        if type(qpos_j) != jnp.ndarray:
+        if not isinstance(qpos_j, jnp.ndarray):
             return data
         qpos_j = qpos_j.at[0:1].set(new_x)
         qpos_j = qpos_j.at[1:2].set(new_y)
@@ -1291,7 +1290,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            # + 4  # imu quat
             + 3  # projected gravity
             + num_commands
             + (3 if self.config.use_gyro else 0)  # imu_gyro
@@ -1581,12 +1579,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             axis=-1,
         )
 
-        obs_m = {
+        obs_m = xax.FrozenDict({
             "joint_position_observation": joint_pos_n_m,
             "joint_velocity_observation": joint_vel_n_m,
             "sensor_observation_imu_gyro": imu_gyro_3_m,
             "projected_gravity_observation": projected_gravity_3_m,
-        }
+        })
         return obs_m
 
     def mirror_cmd(self, cmd: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
@@ -1611,8 +1609,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ],
             axis=-1,
         )
-        cmd = {"unified_command": cmd_u_m}
-        return cmd
+        return xax.FrozenDict({"unified_command": cmd_u_m})
 
     def unmirror_action(self, action: ksim.Action) -> ksim.Action:
         action_m = self.mirror_joints(action)
