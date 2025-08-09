@@ -78,7 +78,9 @@ def main() -> None:
             axis=-1,
         )
         dist, carry = model.actor.forward(obs, carry)
-        return dist.mode(), carry
+        # Convert carry tuple of tuples into a single Array
+        carry_array = jnp.stack([jnp.stack(c) for c in carry])
+        return dist.mode(), carry_array
 
     init_onnx = export_fn(
         model=init_fn,
