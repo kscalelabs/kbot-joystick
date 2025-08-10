@@ -1423,7 +1423,7 @@ if __name__ == "__main__":
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
-            mirror_loss_scale=0.01,
+            mirror_loss_scale=1.0,
             model_type="lstm",
             hidden_size=256,
             # Simulation parameters.
