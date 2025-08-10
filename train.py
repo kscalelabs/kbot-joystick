@@ -621,7 +621,7 @@ class UnifiedCommand(ksim.Command):
         rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _, __])
         omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _, arms])
         stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry, arms])
-        stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
+        stand_cmd = jnp.concatenate([_, _, _, bhs, _, _, __])
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
@@ -1053,8 +1053,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
-                bh_range=(-0.10, 0.0),  # m
-                bh_standing_range=(-0.25, 0.0),  # m
+                bh_range=(-0.0, 0.0),  # m # NOTE: enforced as min
+                bh_standing_range=(-0.25, 0.05),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 arms_range=arm_joint_limits,  # rad
