@@ -397,63 +397,6 @@ class TerrainBaseHeightReward(ksim.Reward):
 
 
 @attrs.define(frozen=True)
-class StandingFeetPositionReward(ksim.Reward):
-    """Reward for keeping feet at a set distance from each other when standing still."""
-
-    error_scale: float = attrs.field(default=0.25)
-    stance_width: float = attrs.field(default=0.3)
-    base_idx: int = attrs.field(default=1)
-    foot_left_idx: int = attrs.field(default=0)
-    foot_right_idx: int = attrs.field(default=0)
-
-    @classmethod
-    def create(
-        cls,
-        *,
-        physics_model: ksim.PhysicsModel,
-        base_body_name: str,
-        foot_left_body_name: str,
-        foot_right_body_name: str,
-        scale: float,
-        error_scale: float,
-        stance_width: float,
-    ) -> Self:
-        base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
-        fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
-        fr = ksim.get_body_data_idx_from_name(physics_model, foot_right_body_name)
-        return cls(
-            base_idx=base,
-            foot_left_idx=fl,
-            foot_right_idx=fr,
-            scale=scale,
-            error_scale=error_scale,
-            stance_width=stance_width,
-        )
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # get global positions
-        global_l_foot_pos = trajectory.xpos[:, self.foot_left_idx]
-        global_r_foot_pos = trajectory.xpos[:, self.foot_right_idx]
-        base_pos = trajectory.xpos[:, self.base_idx]
-        base_quat = trajectory.xquat[:, self.base_idx, :]
-
-        # compute feet pos in base frame
-        l_foot_pos = xax.rotate_vector_by_quat((global_l_foot_pos - base_pos), base_quat, inverse=True)
-        r_foot_pos = xax.rotate_vector_by_quat((global_r_foot_pos - base_pos), base_quat, inverse=True)
-
-        # calculate stance errors
-        stance_x_error = jnp.abs(l_foot_pos[:, 0] - r_foot_pos[:, 0])
-        stance_y_error = jnp.abs(jnp.abs(l_foot_pos[:, 1] - r_foot_pos[:, 1]) - self.stance_width)
-        stance_error = stance_x_error + stance_y_error
-
-        # only apply reward for standing
-        zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        error = jnp.where(zero_cmd_mask, stance_error, 0.0)
-        reward = jnp.exp(-error / self.error_scale)
-        return reward
-
-
-@attrs.define(frozen=True)
 class FeetOrientationReward(ksim.Reward):
     """Reward for keeping feet pitch and roll oriented parallel to the ground."""
 
@@ -1090,15 +1033,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.05,
                 error_scale=0.02,
             ),
-            # StandingFeetPositionReward.create(
-            #     physics_model=physics_model,
-            #     base_body_name="base",
-            #     foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-            #     foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-            #     scale=0.02,
-            #     error_scale=0.05,
-            #     stance_width=0.30,
-            # ),
             # sim2real
             ksim.ActionVelocityPenalty(scale=-0.05),
             ksim.JointVelocityPenalty(scale=-0.05),
