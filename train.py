@@ -477,11 +477,14 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # compute error for standing
+        base_quat = trajectory.xquat[:, 1, :]
+        base_yaw = xax.quat_to_euler(base_quat)[2]
+
         straight_foot_euler = jnp.stack(
             [
                 jnp.full_like(trajectory.command["unified_command"][:, 3], -jnp.pi / 2),
                 jnp.zeros_like(trajectory.command["unified_command"][:, 3]),
-                trajectory.command["unified_command"][:, 3] - jnp.pi,  # include yaw
+                base_yaw - jnp.pi,  # include yaw
             ],
             axis=-1,
         )
