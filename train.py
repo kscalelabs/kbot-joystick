@@ -1009,20 +1009,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # cmd
-            LinearVelocityTrackingReward(scale=0.2, error_scale=0.1),
+            LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
-            XYOrientationReward(scale=0.1, error_scale=0.01),
+            XYOrientationReward(scale=0.1, error_scale=0.03),
             TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
                 scale=0.1,
-                error_scale=0.05,
+                error_scale=0.1,
                 standard_height=1.0,
                 foot_origin_height=0.06,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.05),
+            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
             FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
@@ -1034,10 +1034,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 error_scale=0.02,
             ),
             # sim2real
-            ksim.ActionVelocityPenalty(scale=-0.05),
-            ksim.JointVelocityPenalty(scale=-0.05),
-            ksim.JointAccelerationPenalty(scale=-0.05),
-            ksim.CtrlPenalty(scale=-0.00001),
+            ksim.ActionVelocityPenalty(scale=-0.02),
+            ksim.JointVelocityPenalty(scale=-0.02),
+            ksim.JointAccelerationPenalty(scale=-0.02),
+            ksim.CtrlPenalty(scale=-0.000005),
         ]
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
