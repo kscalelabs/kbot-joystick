@@ -13,13 +13,18 @@ from kinfer.rust_bindings import PyModelMetadata
 
 from train import HumanoidWalkingTask, Model
 
-NUM_COMMANDS_MODEL = 16
-
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint_path", type=str)
     parser.add_argument("output_path", type=str)
+    parser.add_argument(
+        "--num_commands",
+        type=int,
+        required=True,
+        choices=[3, 16],
+        help="Number of commands (3 or 16)",
+    )
     args = parser.parse_args()
 
     if not (ckpt_path := Path(args.checkpoint_path)).exists():
@@ -34,7 +39,8 @@ def main() -> None:
 
     # Constant values.
     carry_shape = (task.config.depth, 2, task.config.hidden_size)  # TODO carry broken for gru
-    num_commands = NUM_COMMANDS_MODEL
+    num_commands = args.num_commands
+    print(f"num_commands: {num_commands} type: {type(num_commands)}")
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
@@ -55,6 +61,9 @@ def main() -> None:
         gyroscope: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
+        # pad command to 16 regardless of num_commands
+        command = jnp.pad(command, (0, 16 - command.shape[-1]), mode='constant', constant_values=0)
+        
         cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
         cmd_vel = command[..., :2]
         cmd_yaw_rate = command[..., 2:3]
@@ -78,7 +87,6 @@ def main() -> None:
             axis=-1,
         )
         dist, carry = model.actor.forward(obs, carry)
-        # Convert carry tuple of tuples into a single Array
         carry_array = jnp.stack([jnp.stack(c) for c in carry])
         return dist.mode(), carry_array
 
