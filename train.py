@@ -459,6 +459,25 @@ class FeetOrientationReward(ksim.Reward):
         return jnp.exp(-total_error / self.error_scale)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class BaseAccelerationReward(ksim.Reward):
+    """Reward for minimizing base acceleration calculated from qvel."""
+
+    error_scale: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        base_vel = trajectory.qvel[:, :6]  # (T, 6)
+
+        base_vel_padded = jnp.pad(base_vel, ((1, 0), (0, 0)), mode="edge")  # (T+1, 6)
+        done_padded = jnp.pad(trajectory.done, ((1, 0),), mode="edge")  # (T+1,)
+
+        vel_diff = base_vel_padded[1:] - base_vel_padded[:-1]  # (T, 6)
+        acc = jnp.where(done_padded[:-1, None], 0.0, vel_diff)  # (T, 6)
+
+        error = jnp.abs(acc).sum(axis=-1)  # (T,)
+        return jnp.exp(-error / self.error_scale)
+
+
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     base_idx: int
@@ -1034,6 +1053,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 error_scale=0.02,
             ),
             # sim2real
+            BaseAccelerationReward(scale=0.1, error_scale=1.0),
             ksim.ActionVelocityPenalty(scale=-0.05),
             ksim.JointVelocityPenalty(scale=-0.05),
             ksim.JointAccelerationPenalty(scale=-0.05),
