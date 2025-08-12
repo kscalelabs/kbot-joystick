@@ -1030,7 +1030,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-                scale=0.05,
+                scale=0.1,
                 error_scale=0.02,
             ),
             # sim2real
