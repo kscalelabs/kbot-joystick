@@ -154,51 +154,45 @@ class FeetAirtimeReward(ksim.StatefulReward):
     scale_by_curriculum: bool = False
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
-        # initial left and right airtime
-        return jnp.array([0.0, 0.0])
+        airtime_carry = jnp.array([0.0, 0.0])
+        first_contact_carry = jnp.array([False, False])
+        return airtime_carry, first_contact_carry
 
-    def _airtime_sequence(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
+    def _compute_airtime(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
         """Returns an array with the airtime (in seconds) for each timestep."""
-
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
             new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
             return new_time, new_time
 
-        # or with done to reset the airtime counter when the episode is done
         contact_or_done = jnp.logical_or(contact_bool, done)
         carry, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
         return carry, airtime
+    
+    def _compute_first_contact(self, initial_first_contact: Array, contact_bool: Array) -> Array:
+        """Returns a boolean array indicating if a timestep is the first contact after flight."""
+        prev_contact = jnp.concatenate([jnp.array([initial_first_contact]), contact_bool[:-1]])
+        first_contact = jnp.logical_and(contact_bool, jnp.logical_not(prev_contact))
+        return first_contact
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
+        airtime_carry, first_contact_carry = reward_carry
+
         left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
         right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
 
-        # airtime counters
-        left_carry, left_air = self._airtime_sequence(reward_carry[0], left_contact, traj.done)
-        right_carry, right_air = self._airtime_sequence(reward_carry[1], right_contact, traj.done)
+        left_carry, left_air = self._compute_airtime(airtime_carry[0], left_contact, traj.done)
+        right_carry, right_air = self._compute_airtime(airtime_carry[1], right_contact, traj.done)
 
-        reward_carry = jnp.array([left_carry, right_carry])
+        first_contact_l = self._compute_first_contact(first_contact_carry[0], left_contact) * ~traj.done
+        first_contact_r = self._compute_first_contact(first_contact_carry[1], right_contact) * ~traj.done
 
-        # touchdown boolean (0→1 transition)
-        def touchdown(c: Array) -> Array:
-            prev = jnp.concatenate([jnp.array([False]), c[:-1]])
-            return jnp.logical_and(c, jnp.logical_not(prev))
-
-        td_l = touchdown(left_contact)
-        td_r = touchdown(right_contact)
-
-        left_air_shifted = jnp.roll(left_air, 1)
-        right_air_shifted = jnp.roll(right_air, 1)
-
-        left_feet_airtime_reward = (left_air_shifted - self.touchdown_penalty) * td_l.astype(jnp.float32)
-        right_feet_airtime_reward = (right_air_shifted - self.touchdown_penalty) * td_r.astype(jnp.float32)
+        left_feet_airtime_reward = (jnp.roll(left_air, 1) - self.touchdown_penalty) * first_contact_l.astype(jnp.float32)
+        right_feet_airtime_reward = (jnp.roll(right_air, 1) - self.touchdown_penalty) * first_contact_r.astype(jnp.float32)
 
         reward = jnp.minimum(left_feet_airtime_reward + right_feet_airtime_reward, 0.0)
-
-        # standing mask
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, reward)
-
+        reward_carry = (jnp.array([left_carry, right_carry]), jnp.array([left_contact[-1], right_contact[-1]]))
         return reward, reward_carry
 
 
