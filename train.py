@@ -91,9 +91,13 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.01,
         help="Final learning rate will be this * initial learning rate",
     )
-    mirror_loss_scale: float = xax.field(
+    actor_mirror_loss_scale: float = xax.field(
+        value=1.0,
+        help="Scale for the actor mirror loss",
+    )
+    critic_mirror_loss_scale: float = xax.field(
         value=0.01,
-        help="Scale for the mirror loss",
+        help="Scale for the critic mirror loss",
     )
 
 
