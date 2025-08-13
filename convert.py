@@ -40,7 +40,6 @@ def main() -> None:
     # Constant values.
     carry_shape = (task.config.depth, 2, task.config.hidden_size)  # TODO carry broken for gru
     num_commands = args.num_commands
-    print(f"num_commands: {num_commands} type: {type(num_commands)}")
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
