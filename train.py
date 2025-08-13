@@ -160,6 +160,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
     def _compute_airtime(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
         """Returns an array with the airtime (in seconds) for each timestep."""
+
         def _body(time_since_liftoff: Array, is_contact: Array) -> tuple[Array, Array]:
             new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
             return new_time, new_time
@@ -167,7 +168,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
         contact_or_done = jnp.logical_or(contact_bool, done)
         carry, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
         return carry, airtime
-    
+
     def _compute_first_contact(self, initial_first_contact: Array, contact_bool: Array) -> Array:
         """Returns a boolean array indicating if a timestep is the first contact after flight."""
         prev_contact = jnp.concatenate([jnp.array([initial_first_contact]), contact_bool[:-1]])
@@ -186,8 +187,12 @@ class FeetAirtimeReward(ksim.StatefulReward):
         first_contact_l = self._compute_first_contact(first_contact_carry[0], left_contact) * ~traj.done
         first_contact_r = self._compute_first_contact(first_contact_carry[1], right_contact) * ~traj.done
 
-        left_feet_airtime_reward = (jnp.roll(left_air, 1) - self.touchdown_penalty) * first_contact_l.astype(jnp.float32)
-        right_feet_airtime_reward = (jnp.roll(right_air, 1) - self.touchdown_penalty) * first_contact_r.astype(jnp.float32)
+        left_feet_airtime_reward = (jnp.roll(left_air, 1) - self.touchdown_penalty) * first_contact_l.astype(
+            jnp.float32
+        )
+        right_feet_airtime_reward = (jnp.roll(right_air, 1) - self.touchdown_penalty) * first_contact_r.astype(
+            jnp.float32
+        )
 
         reward = jnp.minimum(left_feet_airtime_reward + right_feet_airtime_reward, 0.0)
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
@@ -1265,7 +1270,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry=actor_c_m,
         )
         unmirrored_actor_dist = self.unmirror_action(mirrored_actor_dist.mean())
-        action_mirror_loss = jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2) * self.config.mirror_loss_scale
+        action_mirror_loss = (
+            jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
+        )
 
         mirrored_value, next_critic_c_m = self.run_critic(
             model=model.critic,
@@ -1273,7 +1280,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=self.mirror_cmd(transition.command),
             carry=critic_c_m,
         )
-        value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.mirror_loss_scale
+        value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=jnp.expand_dims(log_probs, axis=0),
@@ -1559,7 +1566,8 @@ if __name__ == "__main__":
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
-            mirror_loss_scale=1.0,
+            actor_mirror_loss_scale=1.0,
+            critic_mirror_loss_scale=0.01,
             model_type="lstm",
             hidden_size=256,
             # Simulation parameters.
