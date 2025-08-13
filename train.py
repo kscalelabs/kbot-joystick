@@ -1233,60 +1233,80 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def _ppo_scan_fn(
         self,
-        actor_critic_carry: tuple[Array, Array, Array],
+        carries: tuple[
+            tuple[tuple[Array, Array], tuple[Array, Array]], tuple[tuple[Array, Array], tuple[Array, Array]]
+        ],
         xs: tuple[ksim.Trajectory, PRNGKeyArray],
         model: Model,
-    ) -> tuple[tuple[Array, Array, Array], ksim.PPOVariables]:
+    ) -> tuple[tuple[tuple[Array, Array], tuple[Array, Array]], ksim.PPOVariables]:
         transition, rng = xs
 
-        actor_carry, critic_carry, actor_mirror_carry = actor_critic_carry
-        actor_dist, next_actor_carry = self.run_actor(
+        actor_critic_c, actor_critic_c_m = carries
+        actor_c, critic_c = actor_critic_c
+        actor_c_m, critic_c_m = actor_critic_c_m
+
+        actor_dist, next_actor_c = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
-            carry=actor_carry,
+            carry=actor_c,
         )
 
         # Gets the log probabilities of the action.
         log_probs = actor_dist.log_prob(transition.action)
         assert isinstance(log_probs, Array)
 
-        value, next_critic_carry = self.run_critic(
+        value, next_critic_c = self.run_critic(
             model=model.critic,
             observations=transition.obs,
             commands=transition.command,
-            carry=critic_carry,
+            carry=critic_c,
         )
 
-        # compute mirror loss
-        mirrored_actor_dist, next_actor_mirror_carry = self.run_actor(
+        # compute mirror losses
+        mirrored_actor_dist, next_actor_c_m = self.run_actor(
             model=model.actor,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
-            carry=actor_mirror_carry,
+            carry=actor_c_m,
         )
         unmirrored_actor_dist = self.unmirror_action(mirrored_actor_dist.mean())
-        mse_loss = jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2)
-        mirror_loss = jnp.mean(mse_loss) * self.config.mirror_loss_scale
+        action_mirror_loss = jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2) * self.config.mirror_loss_scale
+
+        mirrored_value, next_critic_c_m = self.run_critic(
+            model=model.critic,
+            observations=self.mirror_obs(transition.obs),
+            commands=self.mirror_cmd(transition.command),
+            carry=critic_c_m,
+        )
+        value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
             log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
             entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
             action_std=actor_dist.stddev(),
-            aux_losses={"mirror_loss": mirror_loss},
+            aux_losses={
+                "action_mirror_loss": action_mirror_loss,
+                "value_mirror_loss": value_mirror_loss,
+            },
         )
 
-        initial_carry = self.get_initial_model_carry(None, None)
-        initial_mirror_carry = jax.tree.map(lambda x: jnp.zeros_like(x), initial_carry[0])
-        initial_carry = initial_carry + (initial_mirror_carry,)
-        next_carry = jax.tree.map(
+        initial_c = self.get_initial_model_carry(None, None)
+        initial_c_m = self.get_initial_model_carry(None, None)
+        next_actor_critic_c = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
-            initial_carry,
-            (next_actor_carry, next_critic_carry, next_actor_mirror_carry),
+            initial_c,
+            (next_actor_c, next_critic_c),
         )
+        next_actor_critic_c_m = jax.tree.map(
+            lambda x, y: jnp.where(transition.done, x, y),
+            initial_c_m,
+            (next_actor_c_m, next_critic_c_m),
+        )
+        next_carries = (next_actor_critic_c, next_actor_critic_c_m)
 
-        return next_carry, transition_ppo_variables
+        return next_carries, transition_ppo_variables
 
     def get_ppo_variables(
         self,
@@ -1297,17 +1317,17 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[ksim.PPOVariables, tuple[Array, Array]]:
         scan_fn = functools.partial(self._ppo_scan_fn, model=model)
 
-        # add a third carry for the mirror actor
-        actor_mirror_carry = jax.tree.map(lambda x: jnp.zeros_like(x), model_carry[0])
-        model_carry = model_carry + (actor_mirror_carry,)
-        assert len(model_carry) == 3, "Model carry should have 3 elements"
-        next_model_carry, ppo_variables = xax.scan(
+        # get an extra initial carry for the mirror losses
+        mirror_carry = self.get_initial_model_carry(None, None)
+        carries = (model_carry, mirror_carry)
+        next_carries, ppo_variables = xax.scan(
             scan_fn,
-            model_carry,
+            carries,
             (trajectory, jax.random.split(rng, len(trajectory.done))),
             jit_level=4,
         )
-        return ppo_variables, next_model_carry[:-1]
+        next_model_carry, next_mirror_carry = next_carries
+        return ppo_variables, next_model_carry
 
     def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
         if self.config.model_type == "gru":
@@ -1370,7 +1390,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return j_m
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
-        # only mirror obs the actor takes as input
+        # actor obs
         joint_pos_n_m = self.mirror_joints(obs["joint_position_observation"])
         joint_vel_n_m = self.mirror_joints(obs["joint_velocity_observation"])
         imu_gyro_3_m = jnp.concatenate(
@@ -1390,12 +1410,114 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             axis=-1,
         )
 
+        # critic obs
+        qpos_m = self.mirror_joints(obs["qpos_observation"])
+        qvel_m = self.mirror_joints(obs["qvel_observation"])
+        left_touch_m = obs["sensor_observation_right_foot_touch"]  # flip left and right
+        right_touch_m = obs["sensor_observation_left_foot_touch"]  # flip left and right
+        feet_position_6_m = jnp.concatenate(
+            [
+                obs["feet_position_observation"][..., 3:4],  # left x = right x
+                -obs["feet_position_observation"][..., 4:5],  # left y = -right y
+                obs["feet_position_observation"][..., 5:6],  # left z = right z
+                obs["feet_position_observation"][..., 0:1],  # right x = left x
+                -obs["feet_position_observation"][..., 1:2],  # right y = -left y
+                obs["feet_position_observation"][..., 2:3],  # right z = left z
+            ],
+            axis=-1,
+        )
+        base_position_3_m = obs["base_position_observation"]  # no mirror because global frame
+        base_orientation_4_m = jnp.concatenate(
+            [
+                obs["base_orientation_observation"][..., 0:1],
+                -obs["base_orientation_observation"][..., 1:2],
+                -obs["base_orientation_observation"][..., 2:3],
+                obs["base_orientation_observation"][..., 3:4],
+            ],
+            axis=-1,
+        )
+
+        # NOTE very unsure about COM mirror correctness
+        cinert = obs["center_of_mass_inertia_observation"].reshape(-1, 10)
+        # Fields (MuJoCo cinert): [m, m*cx, m*cy, m*cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
+        cinert_m = jnp.concatenate(
+            [
+                cinert[..., 0:1],  # m
+                cinert[..., 1:2],  # m*cx
+                -cinert[..., 2:3],  # m*cy -> flip
+                cinert[..., 3:4],  # m*cz
+                cinert[..., 4:5],  # Ixx
+                cinert[..., 5:6],  # Iyy
+                cinert[..., 6:7],  # Izz
+                -cinert[..., 7:8],  # Ixy -> flip
+                cinert[..., 8:9],  # Ixz
+                -cinert[..., 9:10],  # Iyz -> flip
+            ],
+            axis=-1,
+        ).reshape(obs["center_of_mass_inertia_observation"].shape)
+
+        # mirror COM velocity across sagittal plane
+        # Assume per-body layout [vx, vy, vz, wx, wy, wz]
+        cvel = obs["center_of_mass_velocity_observation"].reshape(-1, 6)
+        lin = cvel[..., 0:3]
+        ang = cvel[..., 3:6]
+        lin_m = jnp.concatenate(
+            [
+                lin[..., 0:1],  # vx
+                -lin[..., 1:2],  # vy -> flip
+                lin[..., 2:3],  # vz
+            ],
+            axis=-1,
+        )
+        ang_m = jnp.concatenate(
+            [
+                -ang[..., 0:1],  # wx -> flip (axial with det=-1)
+                ang[..., 1:2],  # wy
+                -ang[..., 2:3],  # wz -> flip (axial with det=-1)
+            ],
+            axis=-1,
+        )
+        cvel_m = jnp.concatenate([lin_m, ang_m], axis=-1).reshape(obs["center_of_mass_velocity_observation"].shape)
+
+        base_lin_vel_3_m = jnp.concatenate(
+            [
+                obs["base_linear_velocity_observation"][..., 0:1],
+                -obs["base_linear_velocity_observation"][..., 1:2],
+                obs["base_linear_velocity_observation"][..., 2:3],
+            ],
+            axis=-1,
+        )
+        base_ang_vel_3_m = jnp.concatenate(
+            [
+                -obs["base_angular_velocity_observation"][..., 0:1],
+                obs["base_angular_velocity_observation"][..., 1:2],
+                -obs["base_angular_velocity_observation"][..., 2:3],
+            ],
+            axis=-1,
+        )
+
+        actuator_force_m = self.mirror_joints(obs["actuator_force_observation"])
+        base_height_m = obs["base_height_observation"]
+
         obs_m = xax.FrozenDict(
             {
                 "joint_position_observation": joint_pos_n_m,
                 "joint_velocity_observation": joint_vel_n_m,
                 "sensor_observation_imu_gyro": imu_gyro_3_m,
                 "projected_gravity_observation": projected_gravity_3_m,
+                "qpos_observation": qpos_m,
+                "qvel_observation": qvel_m,
+                "sensor_observation_left_foot_touch": left_touch_m,
+                "sensor_observation_right_foot_touch": right_touch_m,
+                "feet_position_observation": feet_position_6_m,
+                "base_position_observation": base_position_3_m,
+                "base_orientation_observation": base_orientation_4_m,
+                "center_of_mass_inertia_observation": cinert_m,
+                "center_of_mass_velocity_observation": cvel_m,
+                "base_linear_velocity_observation": base_lin_vel_3_m,
+                "base_angular_velocity_observation": base_ang_vel_3_m,
+                "actuator_force_observation": actuator_force_m,
+                "base_height_observation": base_height_m,
             }
         )
         return obs_m
