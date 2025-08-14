@@ -211,7 +211,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
             jnp.float32
         )
 
-        reward = jnp.minimum(left_feet_airtime_reward + right_feet_airtime_reward, 0.0)
+        reward = left_feet_airtime_reward + right_feet_airtime_reward
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, reward)
         reward_carry = (jnp.array([left_carry, right_carry]), jnp.array([left_contact[-1], right_contact[-1]]))
