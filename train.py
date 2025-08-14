@@ -1044,20 +1044,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
         return [
             # cmd
-            LinearVelocityTrackingReward(scale=0.2, error_scale=0.1),
+            LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
-            XYOrientationReward(scale=0.1, error_scale=0.01),
+            XYOrientationReward(scale=0.1, error_scale=0.03),
             TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
                 scale=0.1,
-                error_scale=0.05,
+                error_scale=0.1,
                 standard_height=1.0,
                 foot_origin_height=0.06,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.05),
+            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
             NoContactPenalty(scale=-0.1),
