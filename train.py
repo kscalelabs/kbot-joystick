@@ -158,7 +158,7 @@ class NoContactPenalty(ksim.Reward):
         left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
         right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
-        return jnp.where(is_zero_cmd, 0.0, jnp.where(jnp.logical_or(left_contact, right_contact), 1.0, 0.0))
+        return jnp.where(is_zero_cmd, 0.0, jnp.where(jnp.logical_or(left_contact, right_contact), 0.0, 1.0))
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1070,7 +1070,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 error_scale=0.02,
             ),
             # sim2real
-            BaseAccelerationReward(scale=0.1, error_scale=1.0),
+            BaseAccelerationReward(scale=0.1, error_scale=5.0),
             ksim.ActionVelocityPenalty(scale=-0.05),
             ksim.JointVelocityPenalty(scale=-0.05),
             ksim.JointAccelerationPenalty(scale=-0.05),
