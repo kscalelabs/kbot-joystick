@@ -149,6 +149,19 @@ class SingleFootContactReward(ksim.StatefulReward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class NoContactPenalty(ksim.Reward):
+    """ Reward for having no contact with the ground when walking."""
+
+    scale: float = -0.1
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
+        return jnp.where(is_zero_cmd, 0.0, jnp.where(jnp.logical_or(left_contact, right_contact), 1.0, 0.0))
+
+
+@attrs.define(frozen=True, kw_only=True)
 class FeetAirtimeReward(ksim.StatefulReward):
     """Encourages reasonable step frequency by rewarding long swing phases and penalizing quick stepping."""
 
@@ -1047,6 +1060,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.05),
             # shaping
             SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
+            NoContactPenalty(scale=-0.1),
             FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             FeetOrientationReward.create(
                 physics_model=physics_model,
