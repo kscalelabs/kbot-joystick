@@ -404,7 +404,12 @@ class TerrainBaseHeightReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class FeetOrientationReward(ksim.Reward):
-    """Reward for keeping feet pitch and roll oriented parallel to the ground."""
+    """Reward for keeping feet oriented parallel to the ground.
+
+    For linear walking and standing, this reward considers roll, pitch, and yaw angles
+    of the feet. For angular walking (turning/rotating), it only considers roll and pitch,
+    allowing the feet to yaw freely.
+    """
 
     error_scale: float = attrs.field(default=0.25)
     foot_left_idx: int = attrs.field(default=0)
@@ -425,44 +430,33 @@ class FeetOrientationReward(ksim.Reward):
         return cls(foot_left_idx=fl, foot_right_idx=fr, scale=scale, error_scale=error_scale)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # compute error for standing
-        base_quat = trajectory.xquat[:, 1, :]
-        base_yaw = xax.quat_to_euler(base_quat)[:, 2]
-
+        base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
         straight_foot_euler = jnp.stack(
             [
                 jnp.full_like(base_yaw, -jnp.pi / 2),
                 jnp.zeros_like(base_yaw),
-                base_yaw - jnp.pi,  # include yaw
+                base_yaw - jnp.pi,
             ],
             axis=-1,
         )
-        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
 
+        # compute rpy error
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
         left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_left_idx, :], axis=-1) ** 2
         right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_right_idx, :], axis=-1) ** 2
-        standing_error = left_quat_error + right_quat_error
+        rpy_error = left_quat_error + right_quat_error
 
-        # compute error for walking
-        left_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_left_idx, :])
-        right_foot_euler = xax.quat_to_euler(trajectory.xquat[:, self.foot_right_idx, :])
+        # compute rp error
+        feet_euler = xax.quat_to_euler(trajectory.xquat[:, [self.foot_left_idx, self.foot_right_idx], :])
+        feet_quat = xax.euler_to_quat(feet_euler.at[:, :, 2].set(0.0))
 
-        # for walking, mask out yaw
-        left_foot_quat = xax.euler_to_quat(left_foot_euler.at[:, 2].set(0.0))
-        right_foot_quat = xax.euler_to_quat(right_foot_euler.at[:, 2].set(0.0))
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler.at[:, 2].set(0.0))
+        rp_error = (1 - jnp.sum(straight_foot_quat[:, None, :] * feet_quat, axis=-1) ** 2).sum(axis=1)
 
-        straight_foot_euler = jnp.stack([-jnp.pi / 2, 0, 0], axis=-1)
-        straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
-
-        left_quat_error = 1 - jnp.sum(straight_foot_quat * left_foot_quat, axis=-1) ** 2
-        right_quat_error = 1 - jnp.sum(straight_foot_quat * right_foot_quat, axis=-1) ** 2
-        walking_error = left_quat_error + right_quat_error
-
-        # choose standing or walking error based on command
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        total_error = jnp.where(is_zero_cmd, standing_error, walking_error)
-
-        return jnp.exp(-total_error / self.error_scale)
+        # choose rp error or rpy error based on command
+        is_rotating = jnp.linalg.norm(trajectory.command["unified_command"][:, 2], axis=-1) > 1e-3
+        error = jnp.where(is_rotating, rp_error, rpy_error)
+        return jnp.exp(-error / self.error_scale)
 
 
 @attrs.define(frozen=True, kw_only=True)
