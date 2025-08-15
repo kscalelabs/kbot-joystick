@@ -1165,8 +1165,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Actor,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[distrax.Distribution, Array]:
+        carry: tuple[tuple[Array, ...], ...],
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
         joint_pos_n = observations["joint_position_observation"]
         joint_vel_n = observations["joint_velocity_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
@@ -1204,8 +1204,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Critic,
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
-        carry: Array,
-    ) -> tuple[Array, Array]:
+        carry: tuple[tuple[Array, ...], ...],
+    ) -> tuple[Array, tuple[tuple[Array, ...], ...]]:
         qpos_n = observations["qpos_observation"]
         qvel_n = observations["qvel_observation"]
         projected_gravity_3 = observations["projected_gravity_observation"]
@@ -1324,8 +1324,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             },
         )
 
-        initial_c = self.get_initial_model_carry(None, None)
-        initial_c_m = self.get_initial_model_carry(None, None)
+        initial_c = self.get_initial_model_carry()
+        initial_c_m = self.get_initial_model_carry()
         next_actor_critic_c = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
             initial_c,
@@ -1350,7 +1350,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         scan_fn = functools.partial(self._ppo_scan_fn, model=model)
 
         # get an extra initial carry for the mirror losses
-        mirror_carry = self.get_initial_model_carry(None, None)
+        mirror_carry = self.get_initial_model_carry()
         carries = (model_carry, mirror_carry)
         next_carries, ppo_variables = xax.scan(
             scan_fn,
@@ -1361,7 +1361,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         next_model_carry, next_mirror_carry = next_carries
         return ppo_variables, next_model_carry
 
-    def get_initial_model_carry(self, model: Model, rng: PRNGKeyArray) -> tuple[Array, Array]:
+    def get_initial_model_carry(
+        self, model: Model | None = None, rng: PRNGKeyArray | None = None
+    ) -> tuple[tuple[tuple[Array, ...], ...], tuple[tuple[Array, ...], ...]]:
         if self.config.model_type == "gru":
             return (
                 tuple((jnp.zeros(shape=(self.config.hidden_size)),) for _ in range(self.config.depth)),
