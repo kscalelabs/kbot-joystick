@@ -102,20 +102,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class ContactForcePenalty(ksim.Reward):
-    """Penalises vertical forces above threshold."""
-
-    scale: float = -1.0
-    max_contact_force: float = 350.0
-    sensor_names: tuple[str, ...]
-
-    def get_reward(self, traj: ksim.Trajectory) -> Array:
-        forces = jnp.stack([traj.obs[n] for n in self.sensor_names], axis=-1)
-        cost = jnp.clip(jnp.abs(forces[:, 2, :]) - self.max_contact_force, 0)
-        return jnp.sum(cost, axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class SingleFootContactReward(ksim.StatefulReward):
     """Reward having one and only one foot in contact with the ground, while walking.
 
