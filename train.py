@@ -337,8 +337,8 @@ class AngularVelocityReward(ksim.Reward):
     cmd_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        base_ang_vel = traj.qvel[:, 5:6]
-        base_ang_vel_cmd = traj.command[self.cmd_name][:, 2:3]
+        base_ang_vel = traj.qvel[:, 5]
+        base_ang_vel_cmd = traj.command[self.cmd_name][:, 2]
 
         ang_vel_error = jnp.abs(base_ang_vel - base_ang_vel_cmd)
         return jnp.exp(-ang_vel_error / self.error_scale)
