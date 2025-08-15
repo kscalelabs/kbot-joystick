@@ -136,7 +136,7 @@ class SingleFootContactReward(ksim.StatefulReward):
 
 @attrs.define(frozen=True, kw_only=True)
 class NoContactPenalty(ksim.Reward):
-    """Reward for having no contact with the ground when walking."""
+    """Penalty for having no contact with the ground when walking."""
 
     scale: float = -0.1
 
@@ -158,8 +158,8 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         airtime_carry = jnp.array([0.0, 0.0])
-        first_contact_carry = jnp.array([False, False])
-        return airtime_carry, first_contact_carry
+        contact_carry = jnp.array([False, False])
+        return airtime_carry, contact_carry
 
     def _compute_airtime(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
         """Returns an array with the airtime (in seconds) for each timestep."""
@@ -168,39 +168,32 @@ class FeetAirtimeReward(ksim.StatefulReward):
             new_time = jnp.where(is_contact, 0.0, time_since_liftoff + self.ctrl_dt)
             return new_time, new_time
 
-        contact_or_done = jnp.logical_or(contact_bool, done)
+        contact_or_done = jnp.logical_or(contact_bool, done[:, None])
         carry, airtime = jax.lax.scan(_body, initial_airtime, contact_or_done)
         return carry, airtime
 
-    def _compute_first_contact(self, initial_first_contact: Array, contact_bool: Array) -> Array:
+    def _compute_first_contact(self, contact_carry: Array, contact_bool: Array) -> Array:
         """Returns a boolean array indicating if a timestep is the first contact after flight."""
-        prev_contact = jnp.concatenate([jnp.array([initial_first_contact]), contact_bool[:-1]])
+        prev_contact = jnp.concatenate([contact_carry[None, :], contact_bool[:-1]], axis=0)
         first_contact = jnp.logical_and(contact_bool, jnp.logical_not(prev_contact))
         return first_contact
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
-        airtime_carry, first_contact_carry = reward_carry
+        airtime_carry, contact_carry = reward_carry
 
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        contact_l = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)
+        contact_r = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)
+        contact = jnp.stack([contact_l[:, 0], contact_r[:, 0]], axis=-1)
 
-        left_carry, left_air = self._compute_airtime(airtime_carry[0], left_contact, traj.done)
-        right_carry, right_air = self._compute_airtime(airtime_carry[1], right_contact, traj.done)
+        new_airtime_carry, airtime = self._compute_airtime(airtime_carry, contact, traj.done)
+        first_contact = self._compute_first_contact(contact_carry, contact) * ~traj.done[:, None]
+        # shift airtime by 1 to match touchdowns with previous step airtimes
+        airtime = jnp.concatenate([airtime_carry[None, :], airtime], axis=0)[:-1, :]
+        reward = jnp.sum((airtime - self.touchdown_penalty) * first_contact.astype(jnp.float32), axis=-1)
 
-        first_contact_l = self._compute_first_contact(first_contact_carry[0], left_contact) * ~traj.done
-        first_contact_r = self._compute_first_contact(first_contact_carry[1], right_contact) * ~traj.done
-
-        left_feet_airtime_reward = (jnp.roll(left_air, 1) - self.touchdown_penalty) * first_contact_l.astype(
-            jnp.float32
-        )
-        right_feet_airtime_reward = (jnp.roll(right_air, 1) - self.touchdown_penalty) * first_contact_r.astype(
-            jnp.float32
-        )
-
-        reward = left_feet_airtime_reward + right_feet_airtime_reward
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, reward)
-        reward_carry = (jnp.array([left_carry, right_carry]), jnp.array([left_contact[-1], right_contact[-1]]))
+        reward_carry = (new_airtime_carry, contact[-1, :])
         return reward, reward_carry
 
 
