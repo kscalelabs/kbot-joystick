@@ -150,7 +150,7 @@ class SingleFootContactReward(ksim.StatefulReward):
 
 @attrs.define(frozen=True, kw_only=True)
 class NoContactPenalty(ksim.Reward):
-    """ Reward for having no contact with the ground when walking."""
+    """Reward for having no contact with the ground when walking."""
 
     scale: float = -0.1
 
@@ -327,6 +327,21 @@ class AngularVelocityTrackingReward(ksim.Reward):
         # Compute quaternion error
         quat_error = 1 - jnp.sum(base_yaw_target_quat * base_yaw_quat, axis=-1) ** 2
         return jnp.exp(-quat_error / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class AngularVelocityReward(ksim.Reward):
+    """Reward for tracking the angular velocity."""
+
+    error_scale: float = attrs.field(default=0.25)
+    cmd_name: str = attrs.field(default="unified_command")
+
+    def get_reward(self, traj: ksim.Trajectory) -> Array:
+        base_ang_vel = traj.qvel[:, 5:6]
+        base_ang_vel_cmd = traj.command[self.cmd_name][:, 2:3]
+
+        ang_vel_error = jnp.abs(base_ang_vel - base_ang_vel_cmd)
+        return jnp.exp(-ang_vel_error / self.error_scale)
 
 
 @attrs.define(frozen=True)
@@ -1029,7 +1044,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
-                bh_range=(-0.25, 0.05),  # m 
+                bh_range=(-0.25, 0.05),  # m
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 arms_range=arm_joint_limits,  # rad
@@ -1043,6 +1058,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # cmd
             LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
+            # AngularVelocityReward(scale=0.1, error_scale=0.2),
             XYOrientationReward(scale=0.1, error_scale=0.03),
             TerrainBaseHeightReward.create(
                 physics_model=physics_model,
