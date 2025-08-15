@@ -20,28 +20,28 @@ import xax
 from jaxtyping import Array, PRNGKeyArray, PyTree
 
 # These are in the order of the neural network outputs.
-# Joint name, target position, penalty weight.
-ZEROS: list[tuple[str, float, float]] = [
-    ("dof_right_shoulder_pitch_03", 0.0, 1.0),
-    ("dof_right_shoulder_roll_03", math.radians(-10.0), 1.0),
-    ("dof_right_shoulder_yaw_02", 0.0, 1.0),
-    ("dof_right_elbow_02", math.radians(90.0), 1.0),
-    ("dof_right_wrist_00", 0.0, 1.0),
-    ("dof_left_shoulder_pitch_03", 0.0, 1.0),
-    ("dof_left_shoulder_roll_03", math.radians(10.0), 1.0),
-    ("dof_left_shoulder_yaw_02", 0.0, 1.0),
-    ("dof_left_elbow_02", math.radians(-90.0), 1.0),
-    ("dof_left_wrist_00", 0.0, 1.0),
-    ("dof_right_hip_pitch_04", math.radians(-20.0), 1.0),
-    ("dof_right_hip_roll_03", math.radians(-0.0), 1.0),
-    ("dof_right_hip_yaw_03", 0.0, 1.0),
-    ("dof_right_knee_04", math.radians(-50.0), 1.0),
-    ("dof_right_ankle_02", math.radians(30.0), 1.0),
-    ("dof_left_hip_pitch_04", math.radians(20.0), 1.0),
-    ("dof_left_hip_roll_03", math.radians(0.0), 1.0),
-    ("dof_left_hip_yaw_03", 0.0, 1.0),
-    ("dof_left_knee_04", math.radians(50.0), 1.0),
-    ("dof_left_ankle_02", math.radians(-30.0), 1.0),
+# Joint name, neutral position
+JOINT_BIASES: list[tuple[str, float]] = [
+    ("dof_right_shoulder_pitch_03", 0.0),
+    ("dof_right_shoulder_roll_03", math.radians(-10.0)),
+    ("dof_right_shoulder_yaw_02", 0.0),
+    ("dof_right_elbow_02", math.radians(90.0)),
+    ("dof_right_wrist_00", 0.0),
+    ("dof_left_shoulder_pitch_03", 0.0),
+    ("dof_left_shoulder_roll_03", math.radians(10.0)),
+    ("dof_left_shoulder_yaw_02", 0.0),
+    ("dof_left_elbow_02", math.radians(-90.0)),
+    ("dof_left_wrist_00", 0.0),
+    ("dof_right_hip_pitch_04", math.radians(-20.0)),
+    ("dof_right_hip_roll_03", math.radians(-0.0)),
+    ("dof_right_hip_yaw_03", 0.0),
+    ("dof_right_knee_04", math.radians(-50.0)),
+    ("dof_right_ankle_02", math.radians(30.0)),
+    ("dof_left_hip_pitch_04", math.radians(20.0)),
+    ("dof_left_hip_roll_03", math.radians(0.0)),
+    ("dof_left_hip_yaw_03", 0.0),
+    ("dof_left_knee_04", math.radians(50.0)),
+    ("dof_left_ankle_02", math.radians(-30.0)),
 ]
 
 
@@ -256,7 +256,7 @@ class ArmPositionReward(ksim.Reward):
         # Map joint names to indices
         joint_to_idx = ksim.get_qpos_data_idxs_by_name(physics_model)
         joint_indices = jnp.array([int(joint_to_idx[name][0]) - 7 for name in joint_names])
-        joint_biases = jnp.array([bias for (name, bias, _) in ZEROS if name in joint_names])
+        joint_biases = jnp.array([bias for (name, bias) in JOINT_BIASES if name in joint_names])
 
         return cls(
             joint_indices=joint_indices,
@@ -808,7 +808,7 @@ class Actor(eqx.Module):
 
         # Apply bias to the means
         arm_cmd_bias = jnp.concatenate([obs_n[..., -13:-3], jnp.zeros(shape=(10,))], axis=-1)
-        mean_n = mean_n + jnp.array([v for _, v, _ in ZEROS]) + arm_cmd_bias
+        mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
 
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
@@ -987,7 +987,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v, _ in ZEROS}, scale=0.1),
+            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v in JOINT_BIASES}, scale=0.1),
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
@@ -1036,7 +1036,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
-        arm_joint_names = [name for name, _, _ in ZEROS[:10]]
+        arm_joint_names = [name for name, _ in JOINT_BIASES[:10]]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return [
@@ -1112,7 +1112,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def get_model(self, key: PRNGKeyArray) -> Model:
-        num_joints = len(ZEROS)
+        num_joints = len(JOINT_BIASES)
 
         num_commands = (
             2  # linear velocity command (vx, vy)
@@ -1151,7 +1151,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             key,
             model_type=self.config.model_type,
             num_actor_inputs=num_actor_inputs,
-            num_actor_outputs=len(ZEROS),
+            num_actor_outputs=len(JOINT_BIASES),
             num_critic_inputs=num_critic_inputs,
             min_std=0.01,
             max_std=1.0,
