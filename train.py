@@ -560,7 +560,6 @@ class UnifiedCommand(ksim.Command):
     vy_range: tuple[float, float] = attrs.field()
     wz_range: tuple[float, float] = attrs.field()
     bh_range: tuple[float, float] = attrs.field()
-    bh_standing_range: tuple[float, float] = attrs.field()
     rx_range: tuple[float, float] = attrs.field()
     ry_range: tuple[float, float] = attrs.field()
     arms_range: tuple[list[float], list[float]] = attrs.field()
@@ -575,13 +574,12 @@ class UnifiedCommand(ksim.Command):
         vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
         wz = jax.random.uniform(rng_d, (1,), minval=self.wz_range[0], maxval=self.wz_range[1])
         bh = jax.random.uniform(rng_e, (1,), minval=self.bh_range[0], maxval=self.bh_range[1])
-        bhs = jax.random.uniform(rng_f, (1,), minval=self.bh_standing_range[0], maxval=self.bh_standing_range[1])
-        rx = jax.random.uniform(rng_g, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
-        ry = jax.random.uniform(rng_h, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
+        rx = jax.random.uniform(rng_f, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
+        ry = jax.random.uniform(rng_g, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
         # 50% chance to sample from wide uniform distribution
         arms_uni = jax.random.uniform(
-            rng_i, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
+            rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
         # 50% chance to mask out 9/10 arm commands and have only 1 active
         active_idx = jax.random.randint(rng_i, (), minval=0, maxval=10)
@@ -594,12 +592,12 @@ class UnifiedCommand(ksim.Command):
         __ = jnp.zeros_like(arms)
 
         # Create each mode's command vector
-        forward_cmd = jnp.concatenate([vx, _, _, bh, _, _, __])
-        sideways_cmd = jnp.concatenate([_, vy, _, bh, _, _, __])
-        rotate_cmd = jnp.concatenate([_, _, wz, bh, _, _, __])
-        omni_cmd = jnp.concatenate([vx, vy, wz, bh, _, _, arms])
-        stand_bend_cmd = jnp.concatenate([_, _, _, bhs, rx, ry, arms])
-        stand_cmd = jnp.concatenate([_, _, _, bhs, _, _, __])
+        forward_cmd = jnp.concatenate([vx, _, _, _, _, _, __])
+        sideways_cmd = jnp.concatenate([_, vy, _, _, _, _, __])
+        rotate_cmd = jnp.concatenate([_, _, wz, _, _, _, __])
+        omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
+        stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
         mode = jax.random.randint(rng_a, (), minval=0, maxval=6)  # 0 1 2 3 4s 5s -- 2/6 standing
@@ -1031,8 +1029,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
-                bh_range=(-0.0, 0.0),  # m # NOTE: enforced as min
-                bh_standing_range=(-0.25, 0.05),  # m
+                bh_range=(-0.25, 0.05),  # m 
                 rx_range=(-0.3, 0.3),  # rad
                 ry_range=(-0.3, 0.3),  # rad
                 arms_range=arm_joint_limits,  # rad
@@ -1052,9 +1049,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-                scale=0.1,
-                error_scale=0.1,
-                standard_height=1.0,
+                scale=0.2,
+                error_scale=0.02,
+                standard_height=0.99,
                 foot_origin_height=0.06,
             ),
             ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
