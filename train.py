@@ -261,24 +261,20 @@ class LinearVelocityTrackingReward(ksim.Reward):
     norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        # Get global frame velocities
-        global_vel = trajectory.qvel[:, :3]
-
-        # get base quat, only yaw.
-        # careful to only rotate in z, disregard rx and ry, bad conflict with roll and pitch.
+        # get base quat, yaw only
         base_euler = xax.quat_to_euler(trajectory.xquat[:, 1, :])
         base_euler = base_euler.at[:, :2].set(0.0)
         base_z_quat = xax.euler_to_quat(base_euler)
 
         # rotate local frame commands to global frame
-        robot_vel_cmd = jnp.zeros_like(global_vel).at[:, :2].set(trajectory.command[self.command_name][:, :2])
+        robot_vel_cmd = jnp.pad(trajectory.command[self.command_name][:, :2], ((0, 0), (0, 1)))
         global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
 
         # drop vz. vz conflicts with base height reward.
         global_vel_xy_cmd = global_vel_cmd[:, :2]
-        global_vel_xy = global_vel[:, :2]
+        global_vel_xy = trajectory.qvel[:, :2]
 
-        # now compute error. special trick: different kernels for standing and walking.
+        # compute error. steep kernel for standing, smooth for walking.
         zero_cmd_mask = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
         vel_error = jnp.linalg.norm(global_vel_xy - global_vel_xy_cmd, axis=-1)
         error = jnp.where(zero_cmd_mask, vel_error, jnp.square(vel_error))
