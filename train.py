@@ -340,9 +340,11 @@ class XYOrientationReward(ksim.Reward):
             axis=-1,
         )
         base_xy_quat_cmd = xax.euler_to_quat(commanded_euler)
-
         quat_error = 1 - jnp.sum(base_xy_quat_cmd * base_xy_quat, axis=-1) ** 2
-        return jnp.exp(-quat_error / self.error_scale)
+
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        error_scale = jnp.where(is_zero_cmd, self.error_scale / 10, self.error_scale)
+        return jnp.exp(-quat_error / error_scale)
 
 
 @attrs.define(frozen=True)
