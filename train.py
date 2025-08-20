@@ -1023,8 +1023,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # cmd
             LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
-            AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
-            # AngularVelocityReward(scale=0.1, error_scale=0.2),
+            # AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
+            AngularVelocityReward(scale=0.1, error_scale=0.2),
             XYOrientationReward(scale=0.1, error_scale=0.03),
             TerrainBaseHeightReward.create(
                 physics_model=physics_model,
