@@ -208,7 +208,6 @@ class ArmPositionReward(ksim.Reward):
     joint_indices: Array = attrs.field(eq=False)
     joint_biases: Array = attrs.field(eq=False)
     error_scale: float = attrs.field(default=0.1)
-    norm: xax.NormType = attrs.field(default="l2")
 
     @classmethod
     def create_reward(
@@ -248,7 +247,7 @@ class ArmPositionReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
         target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
-        error = xax.get_norm(qpos_sel - target, self.norm).sum(axis=-1)
+        error = jnp.linalg.norm(qpos_sel - target, axis=-1)
         return jnp.exp(-error / self.error_scale)
 
 
@@ -258,7 +257,6 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.25)
     command_name: str = attrs.field(default="unified_command")
-    norm: xax.NormType = attrs.field(default="l2")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # get base quat, yaw only
