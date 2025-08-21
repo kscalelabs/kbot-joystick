@@ -202,7 +202,7 @@ class ArmPositionReward(ksim.Reward):
     """Reward for tracking commanded arm joint positions.
 
     Compares the current arm joint positions against commanded positions from
-    trajectory.command["unified_command"][7:].
+    trajectory.command["unified_command"][6:].
     """
 
     joint_indices: Array = attrs.field(eq=False)
@@ -246,7 +246,7 @@ class ArmPositionReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
-        target = trajectory.command["unified_command"][..., 7:17] + self.joint_biases
+        target = trajectory.command["unified_command"][..., 6:16] + self.joint_biases
         error = jnp.linalg.norm(qpos_sel - target, axis=-1)
         return jnp.exp(-error / self.error_scale)
 
@@ -256,7 +256,6 @@ class LinearVelocityTrackingReward(ksim.Reward):
     """Reward for tracking the linear velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         # get base quat, yaw only
@@ -265,7 +264,7 @@ class LinearVelocityTrackingReward(ksim.Reward):
         base_z_quat = xax.euler_to_quat(base_euler)
 
         # rotate local frame commands to global frame
-        robot_vel_cmd = jnp.pad(trajectory.command[self.command_name][:, :2], ((0, 0), (0, 1)))
+        robot_vel_cmd = jnp.pad(trajectory.command["unified_command"][:, :2], ((0, 0), (0, 1)))
         global_vel_cmd = xax.rotate_vector_by_quat(robot_vel_cmd, base_z_quat, inverse=False)
 
         # drop vz. vz conflicts with base height reward.
@@ -284,11 +283,10 @@ class AngularVelocityReward(ksim.Reward):
     """Reward for tracking the angular velocity."""
 
     error_scale: float = attrs.field(default=0.25)
-    cmd_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         base_ang_vel = traj.qvel[:, 5]
-        base_ang_vel_cmd = traj.command[self.cmd_name][:, 2]
+        base_ang_vel_cmd = traj.command["unified_command"][:, 2]
 
         ang_vel_error = jnp.abs(base_ang_vel - base_ang_vel_cmd)
         return jnp.exp(-ang_vel_error / self.error_scale)
@@ -300,7 +298,6 @@ class XYOrientationReward(ksim.Reward):
 
     error_scale: float = attrs.field(default=0.03)
     error_scale_zero_cmd: float = attrs.field(default=0.003)
-    command_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         euler_orientation = xax.quat_to_euler(trajectory.xquat[:, 1, :])
@@ -309,9 +306,9 @@ class XYOrientationReward(ksim.Reward):
 
         commanded_euler = jnp.stack(
             [
-                trajectory.command[self.command_name][:, 5],
-                trajectory.command[self.command_name][:, 6],
-                jnp.zeros_like(trajectory.command[self.command_name][:, 6]),
+                trajectory.command["unified_command"][:, 4],
+                trajectory.command["unified_command"][:, 5],
+                jnp.zeros_like(trajectory.command["unified_command"][:, 5]),
             ],
             axis=-1,
         )
@@ -371,7 +368,7 @@ class TerrainBaseHeightReward(ksim.Reward):
         base_z = trajectory.xpos[:, self.base_idx, 2]
 
         current_height = base_z - lowest_foot_z
-        commanded_height = trajectory.command["unified_command"][:, 4] + self.standard_height
+        commanded_height = trajectory.command["unified_command"][:, 3] + self.standard_height
         height_diff = current_height - commanded_height
 
         # for walking: only care about minimum height.
@@ -572,26 +569,12 @@ class UnifiedCommand(ksim.Command):
             ],
         )
 
-        # get initial heading
-        init_euler = xax.quat_to_euler(physics_data.xquat[1])
-        init_heading = init_euler[2] + self.ctrl_dt * cmd[2]  # add 1 step of yaw vel cmd to initial heading.
-        cmd = jnp.concatenate([cmd[:3], jnp.array([init_heading]), cmd[3:]])
-        assert cmd.shape == (17,)
-
+        assert cmd.shape == (16,)
         return cmd
 
     def __call__(
         self, prev_command: Array, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray
     ) -> Array:
-        def update_heading(prev_command: Array) -> Array:
-            """Update the heading by integrating the angular velocity."""
-            wz_cmd, heading = prev_command[2], prev_command[3]
-            heading = heading + wz_cmd * self.ctrl_dt
-            prev_command = prev_command.at[3].set(heading)
-            return prev_command
-
-        continued_command = update_heading(prev_command)
-
         # def update_arms(prev_command: Array) -> Array:
         #     """Move arm commands by x rad/s."""
         #     arms = prev_command[7:17]
@@ -606,7 +589,7 @@ class UnifiedCommand(ksim.Command):
         rng_a, rng_b = jax.random.split(rng)
         switch_mask = jax.random.bernoulli(rng_a, self.switch_prob)
         new_command = self.initial_command(physics_data, curriculum_level, rng_b)
-        return jnp.where(switch_mask, new_command, continued_command)
+        return jnp.where(switch_mask, new_command, prev_command)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1117,9 +1100,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
         lin_vel_cmd = commands["unified_command"][..., :2]
         ang_vel_cmd = commands["unified_command"][..., 2:3]
-        base_height_cmd = commands["unified_command"][..., 4:5]
-        base_roll_pitch_cmd = commands["unified_command"][..., 5:7]
-        arms_cmd = commands["unified_command"][..., 7:17]
+        base_height_cmd = commands["unified_command"][..., 3:4]
+        base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
+        arms_cmd = commands["unified_command"][..., 6:16]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
@@ -1158,7 +1141,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ang_vel_cmd = commands["unified_command"][..., 2:3]
         base_height_cmd = commands["unified_command"][..., 3:4]
         base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
-        arms_cmd = commands["unified_command"][..., 7:17]
+        arms_cmd = commands["unified_command"][..., 6:16]
 
         # privileged obs
         left_touch = observations["sensor_observation_left_foot_touch"]
@@ -1506,14 +1489,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 cmd_u[..., :1],  # x
                 -cmd_u[..., 1:2],  # y
                 -cmd_u[..., 2:3],  # z
-                -cmd_u[..., 3:4],  # heading carry
-                cmd_u[..., 4:5],  # base height
-                -cmd_u[..., 5:6],  # base roll
-                cmd_u[..., 6:7],  # base pitch
+                cmd_u[..., 3:4],  # base height
+                -cmd_u[..., 4:5],  # base roll
+                cmd_u[..., 5:6],  # base pitch
                 self.mirror_joints(
                     jnp.concatenate(
                         [
-                            cmd_u[..., 7:17],
+                            cmd_u[..., 6:16],
                             jnp.zeros(shape=(10,)),
                         ]
                     )
