@@ -280,29 +280,6 @@ class LinearVelocityTrackingReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
-class AngularVelocityTrackingReward(ksim.Reward):
-    """Reward for tracking the heading using quaternion-based error computation."""
-
-    error_scale: float = attrs.field(default=0.25)
-    command_name: str = attrs.field(default="unified_command")
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        base_yaw_cmd = trajectory.command[self.command_name][:, 3]
-
-        base_yaw_quat = xax.euler_to_quat(
-            jnp.stack([jnp.zeros_like(base_yaw_cmd), jnp.zeros_like(base_yaw_cmd), base_yaw], axis=-1)
-        )
-        base_yaw_target_quat = xax.euler_to_quat(
-            jnp.stack([jnp.zeros_like(base_yaw_cmd), jnp.zeros_like(base_yaw_cmd), base_yaw_cmd], axis=-1)
-        )
-
-        # Compute quaternion error
-        quat_error = 1 - jnp.sum(base_yaw_target_quat * base_yaw_quat, axis=-1) ** 2
-        return jnp.exp(-quat_error / self.error_scale)
-
-
-@attrs.define(frozen=True, kw_only=True)
 class AngularVelocityReward(ksim.Reward):
     """Reward for tracking the angular velocity."""
 
@@ -1024,7 +1001,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return [
             # cmd
             LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
-            # AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             AngularVelocityReward(scale=0.1, error_scale=0.2),
             XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
             TerrainBaseHeightReward.create(
