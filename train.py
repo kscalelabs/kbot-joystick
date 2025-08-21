@@ -577,11 +577,11 @@ class UnifiedCommand(ksim.Command):
     ) -> Array:
         # def update_arms(prev_command: Array) -> Array:
         #     """Move arm commands by x rad/s."""
-        #     arms = prev_command[7:17]
+        #     arms = prev_command[6:16]
         #     arm_mask = jnp.where(arms != 0.0, 1.0, 0.0)
         #     arms = arms + arm_mask * self.ctrl_dt * 0.5
         #     arms = arms.clip(self.arms_range[:, 0], self.arms_range[:, 1])
-        #     prev_command = prev_command.at[7:17].set(arms)
+        #     prev_command = prev_command.at[6:16].set(arms)
         #     return prev_command
 
         # continued_command = update_arms(continued_command)
