@@ -321,7 +321,8 @@ class AngularVelocityReward(ksim.Reward):
 class XYOrientationReward(ksim.Reward):
     """Reward for tracking the xy base orientation using quaternion-based error computation."""
 
-    error_scale: float = attrs.field(default=0.25)
+    error_scale: float = attrs.field(default=0.03)
+    error_scale_zero_cmd: float = attrs.field(default=0.003)
     command_name: str = attrs.field(default="unified_command")
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
@@ -341,7 +342,7 @@ class XYOrientationReward(ksim.Reward):
         quat_error = 1 - jnp.sum(base_xy_quat_cmd * base_xy_quat, axis=-1) ** 2
 
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        error_scale = jnp.where(is_zero_cmd, self.error_scale / 10, self.error_scale)
+        error_scale = jnp.where(is_zero_cmd, self.error_scale_zero_cmd, self.error_scale)
         return jnp.exp(-quat_error / error_scale)
 
 
@@ -1025,7 +1026,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             # AngularVelocityTrackingReward(scale=0.1, error_scale=0.005),
             AngularVelocityReward(scale=0.1, error_scale=0.2),
-            XYOrientationReward(scale=0.1, error_scale=0.03),
+            XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
             TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
