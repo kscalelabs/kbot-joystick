@@ -97,7 +97,7 @@ keras==3.9.2
 kiwisolver==1.4.8
 kmv==0.3.14
 kscale==0.3.16
--e git+https://github.com/b-vm/ksim@e86f7050f380e8f3e576128e4c87109bf2ee58bc#egg=ksim
+-e git+https://github.com/b-vm/ksim@7b15cc099cf1bc33528c8aa3f65b3a1927364977#egg=ksim
 libclang==18.1.1
 Markdown==3.8
 markdown-it-py==3.0.0
@@ -112,7 +112,7 @@ mpmath==1.3.0
 msgpack==1.1.0
 mujoco==3.3.2
 mujoco-mjx==3.3.2
--e git+https://github.com/b-vm/mujoco-scenes@54202d71bb0e9f778ddf0ed1f06adc6ad9e3e28f#egg=mujoco_scenes
+-e git+https://github.com/b-vm/mujoco-scenes@eee54b1cb88acef1776606ef07b0ecb706dbc033#egg=mujoco_scenes
 multidict==6.4.3
 namex==0.0.9
 nbclient==0.10.2
@@ -178,6 +178,7 @@ rfc3339-validator==0.1.4
 rfc3986-validator==0.1.1
 rich==14.0.0
 rpds-py==0.25.0
+ruff==0.12.9
 scipy==1.15.3
 Send2Trash==1.8.3
 shiboken6==6.9.0
@@ -219,6 +220,6 @@ websocket-client==1.8.0
 Werkzeug==3.1.3
 widgetsnbextension==4.0.14
 wrapt==1.17.2
-xax==0.3.0
+xax==0.4.2
 yarl==1.20.0
 zipp==3.21.0
