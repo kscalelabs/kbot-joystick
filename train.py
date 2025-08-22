@@ -66,10 +66,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
-    use_gyro: bool = xax.field(
-        value=True,
-        help="Whether to use the IMU gyroscope observations.",
-    )
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=5e-4,
@@ -116,8 +112,8 @@ class SingleFootContactReward(ksim.StatefulReward):
         return jnp.array([0.0])
 
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        left_contact = jnp.where(traj.obs["left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["right_foot_touch"] > 0.1, True, False)[:, 0]
         single = jnp.logical_xor(left_contact, right_contact)
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
 
@@ -141,8 +137,8 @@ class NoContactPenalty(ksim.Reward):
     scale: float = -0.1
 
     def get_reward(self, traj: ksim.Trajectory) -> Array:
-        left_contact = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)[:, 0]
-        right_contact = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)[:, 0]
+        left_contact = jnp.where(traj.obs["left_foot_touch"] > 0.1, True, False)[:, 0]
+        right_contact = jnp.where(traj.obs["right_foot_touch"] > 0.1, True, False)[:, 0]
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         return jnp.where(is_zero_cmd, 0.0, jnp.where(jnp.logical_or(left_contact, right_contact), 0.0, 1.0))
 
@@ -181,8 +177,8 @@ class FeetAirtimeReward(ksim.StatefulReward):
     def get_reward_stateful(self, traj: ksim.Trajectory, reward_carry: PyTree) -> tuple[Array, PyTree]:
         airtime_carry, contact_carry = reward_carry
 
-        contact_l = jnp.where(traj.obs["sensor_observation_left_foot_touch"] > 0.1, True, False)
-        contact_r = jnp.where(traj.obs["sensor_observation_right_foot_touch"] > 0.1, True, False)
+        contact_l = jnp.where(traj.obs["left_foot_touch"] > 0.1, True, False)
+        contact_r = jnp.where(traj.obs["right_foot_touch"] > 0.1, True, False)
         contact = jnp.stack([contact_l[:, 0], contact_r[:, 0]], axis=-1)
 
         new_airtime_carry, airtime = self._compute_airtime(airtime_carry, contact, traj.done)
@@ -450,6 +446,57 @@ class BaseAccelerationReward(ksim.Reward):
         return jnp.exp(-error / self.error_scale)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class JointVelocityPenalty(ksim.Reward):
+    """Penalty for how fast the joint angular velocities are changing."""
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
+        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
+        return xax.get_norm(qvel, "l2").mean(axis=-1)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class JointAccelerationPenalty(ksim.Reward):
+    """Penalty for high joint accelerations."""
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        qpos = trajectory.qpos[..., 7:]
+        qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
+        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
+        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
+        qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
+        penalty = xax.get_norm(qacc, "l2").mean(axis=-1)
+        return penalty
+
+
+@attrs.define(frozen=True, kw_only=True)
+class CtrlPenalty(ksim.Reward):
+    """Penalty for large torque commands."""
+
+    scales: tuple[float, ...] | None = attrs.field(default=None)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        ctrl = trajectory.ctrl
+        if self.scales is not None:
+            ctrl = ctrl / jnp.array(self.scales)
+        return xax.get_norm(ctrl, "l2").mean(axis=-1)
+
+    @classmethod
+    def create(cls, model: ksim.PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
+        ctrl_min = model.actuator_ctrlrange[..., 0]
+        ctrl_max = model.actuator_ctrlrange[..., 1]
+        ctrl_range = (ctrl_max - ctrl_min) / 2.0
+        ctrl_range_list = ctrl_range.flatten().tolist()
+        return cls(
+            scales=tuple(ctrl_range_list),
+            scale=scale,
+            scale_by_curriculum=scale_by_curriculum,
+        )
+
+
 @attrs.define(frozen=True)
 class FeetPositionObservation(ksim.Observation):
     base_idx: int
@@ -496,16 +543,6 @@ class BaseHeightObservation(ksim.Observation):  # TODO not terrain compatible
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         return state.physics_state.data.xpos[1, 2:]
-
-
-class QposObservation(ksim.Observation):
-    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.qpos[7:]
-
-
-class QvelObservation(ksim.Observation):
-    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
-        return state.physics_state.data.qvel[6:]
 
 
 @attrs.define(frozen=True)
@@ -660,17 +697,19 @@ class Actor(eqx.Module):
     input_proj: eqx.nn.Linear
     rnns: tuple[eqx.nn.GRUCell | eqx.nn.LSTMCell, ...]
     output_proj: eqx.nn.Linear
-    num_inputs: int = eqx.static_field()
-    num_outputs: int = eqx.static_field()
-    min_std: float = eqx.static_field()
-    max_std: float = eqx.static_field()
-    var_scale: float = eqx.static_field()
+    num_inputs: int = eqx.field()
+    num_outputs: int = eqx.field()
+    clip_positions: ksim.ClipPositions = eqx.field()
+    min_std: float = eqx.field()
+    max_std: float = eqx.field()
+    var_scale: float = eqx.field()
 
     def __init__(
         self,
         key: PRNGKeyArray,
         *,
         model_type: str,
+        physics_model: ksim.PhysicsModel,
         num_inputs: int,
         num_outputs: int,
         min_std: float,
@@ -711,6 +750,7 @@ class Actor(eqx.Module):
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
+        self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -817,6 +857,7 @@ class Model(eqx.Module):
         key: PRNGKeyArray,
         *,
         model_type: str,
+        physics_model: ksim.PhysicsModel,
         num_actor_inputs: int,
         num_actor_outputs: int,
         num_critic_inputs: int,
@@ -829,6 +870,7 @@ class Model(eqx.Module):
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
             actor_key,
+            physics_model=physics_model,
             model_type=model_type,
             num_inputs=num_actor_inputs,
             num_outputs=num_actor_outputs,
@@ -891,26 +933,28 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             metadata=metadata,
         )
 
-    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> list[ksim.PhysicsRandomizer]:
-        return [
-            ksim.StaticFrictionRandomizer(),
-            ksim.ArmatureRandomizer(),
-            ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
-            ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
-            ksim.JointZeroPositionRandomizer(scale_lower=math.radians(-3), scale_upper=math.radians(3)),
-            ksim.FloorFrictionRandomizer.from_geom_name(
+    def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
+        return {
+            "static_friction": ksim.StaticFrictionRandomizer(),
+            "armature": ksim.ArmatureRandomizer(),
+            "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
+            "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
+            "joint_zero_position": ksim.JointZeroPositionRandomizer(
+                scale_lower=math.radians(-3), scale_upper=math.radians(3)
+            ),
+            "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
-        ]
+        }
 
-    def get_events(self, physics_model: ksim.PhysicsModel) -> list[ksim.Event]:
-        return [
-            ksim.LinearPushEvent(
+    def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
+        return {
+            "linear push": ksim.LinearPushEvent(
                 linvel=1.0,  # BUG: this is not used in ksim actually
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
-        ]
+        }
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
@@ -921,53 +965,66 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             PlaneXYPositionReset(x_range=2.0, y_range=2.0),
         ]
 
-    def get_observations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Observation]:
-        return [
-            ksim.JointPositionObservation(noise=math.radians(2)),
-            QposObservation(),  # noise free joint position for critic
-            ksim.JointVelocityObservation(noise=math.radians(10)),
-            QvelObservation(),  # noise free joint velocity for critic
-            ksim.ActuatorForceObservation(),
-            ksim.CenterOfMassInertiaObservation(),
-            ksim.CenterOfMassVelocityObservation(),
-            ksim.BasePositionObservation(),
-            ksim.BaseOrientationObservation(),
-            ksim.BaseLinearVelocityObservation(),
-            ksim.BaseAngularVelocityObservation(),
-            ksim.BaseLinearAccelerationObservation(),
-            ksim.BaseAngularAccelerationObservation(),
-            ksim.ActuatorAccelerationObservation(),
-            ksim.SensorObservation.create(
+    def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
+        return {
+            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
+            "joint_velocity": ksim.JointVelocityObservation(
+                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))  # TODO confirm noise levels
+            ),
+            "actuator_force": ksim.ActuatorForceObservation(),
+            "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
+            "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
+            "base_position": ksim.BasePositionObservation(),
+            "base_orientation": ksim.BaseOrientationObservation(),
+            "base_linear_velocity": ksim.BaseLinearVelocityObservation(),
+            "base_angular_velocity": ksim.BaseAngularVelocityObservation(),
+            "base_linear_acceleration": ksim.BaseLinearAccelerationObservation(),
+            "base_angular_acceleration": ksim.BaseAngularAccelerationObservation(),
+            "actuator_acceleration": ksim.ActuatorAccelerationObservation(),
+            "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=math.radians(10),
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),  # TODO confirm noise level
             ),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="left_foot_touch", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="right_foot_touch", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_linvel", noise=0.0),
-            ksim.SensorObservation.create(physics_model=physics_model, sensor_name="base_site_angvel", noise=0.0),
-            FeetPositionObservation.create(
+            "left_foot_touch": ksim.SensorObservation.create(
+                physics_model=physics_model, sensor_name="left_foot_touch"
+            ),
+            "right_foot_touch": ksim.SensorObservation.create(
+                physics_model=physics_model, sensor_name="right_foot_touch"
+            ),
+            "base_site_linvel": ksim.SensorObservation.create(
+                physics_model=physics_model, sensor_name="base_site_linvel"
+            ),
+            "base_site_angvel": ksim.SensorObservation.create(
+                physics_model=physics_model, sensor_name="base_site_angvel"
+            ),
+            "feet_position": FeetPositionObservation.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
             ),
-            BaseHeightObservation(),
-            ksim.ProjectedGravityObservation.create(
+            "base_height": BaseHeightObservation(),
+            "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                lag_range=(0.0, 0.1),
-                noise=math.radians(1),
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),  # TODO confirm noise level
+                min_lag=0.0,
+                max_lag=0.1,
                 bias=math.radians(2),
             ),
-        ]
+            "projected_gravity": ksim.ProjectedGravityObservation.create(  # TODO confirm this is even needed
+                physics_model=physics_model,
+                framequat_name="base_site_quat",
+            ),
+        }
 
-    def get_commands(self, physics_model: ksim.PhysicsModel) -> list[ksim.Command]:
+    def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
         arm_joint_names = [name for name, _ in JOINT_BIASES[:10]]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
-        return [
-            UnifiedCommand(
+        return {
+            "unified_command": UnifiedCommand(
                 vx_range=(-0.5, 1.5),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
@@ -978,15 +1035,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
             ),
-        ]
+        }
 
-    def get_rewards(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reward]:
-        return [
+    def get_rewards(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Reward]:
+        return {
             # cmd
-            LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
-            AngularVelocityReward(scale=0.1, error_scale=0.2),
-            XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
-            TerrainBaseHeightReward.create(
+            "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
+            "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
+            "roll_pitch": XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
+            "base_height": TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
@@ -996,12 +1053,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 standard_height=0.99,
                 foot_origin_height=0.06,
             ),
-            ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
+            "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
-            SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
-            NoContactPenalty(scale=-0.1),
-            FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
-            FeetOrientationReward.create(
+            "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
+            "no_contact_p": NoContactPenalty(scale=-0.1),
+            "feet_airtime": FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
+            "feet_orient": FeetOrientationReward.create(
                 physics_model=physics_model,
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
                 foot_right_body_name="KB_D_501R_R_LEG_FOOT",
@@ -1009,16 +1066,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 error_scale=0.02,
             ),
             # sim2real
-            BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            ksim.ActionVelocityPenalty(scale=-0.05),
-            ksim.JointVelocityPenalty(scale=-0.05),
-            ksim.JointAccelerationPenalty(scale=-0.05),
-            ksim.CtrlPenalty(scale=-0.00001),
-        ]
+            "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
+            "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
+            "joint_vel": JointVelocityPenalty(scale=-0.05),  # TODO
+            "joint_accel": JointAccelerationPenalty(scale=-0.05),  # TODO
+            "ctrl": CtrlPenalty(scale=-0.00001),  # TODO maybe ksim new version?
+        }
 
-    def get_terminations(self, physics_model: ksim.PhysicsModel) -> list[ksim.Termination]:
-        return [
-            TerrainBadZTermination.create(
+    def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
+        return {
+            "bad_z": TerrainBadZTermination.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="KB_D_501L_L_LEG_FOOT",
@@ -1026,9 +1083,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 unhealthy_z_lower=0.6,
                 unhealthy_z_upper=1.2,
             ),
-            ksim.NotUprightTermination(max_radians=math.radians(45)),
-            ksim.EpisodeLengthTermination(max_length_sec=24),
-        ]
+            "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
+            "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
+        }
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
         return ksim.LinearCurriculum(
@@ -1037,7 +1094,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             min_level=1.0,  # disable curriculum
         )
 
-    def get_model(self, key: PRNGKeyArray) -> Model:
+    def get_model(self, params: ksim.InitParams) -> Model:
         num_joints = len(JOINT_BIASES)
 
         num_commands = (
@@ -1052,15 +1109,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
             + 3  # projected gravity
+            + 3  # imu_gyro
             + num_commands
-            + (3 if self.config.use_gyro else 0)  # imu_gyro
         )
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
             + 3  # projected gravity
-            + num_commands
             + 3  # imu gyro
+            + num_commands
             + 2  # feet touch
             + 6  # feet position
             + 3  # base pos
@@ -1074,8 +1131,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
         return Model(
-            key,
+            params.key,
             model_type=self.config.model_type,
+            physics_model=params.physics_model,
             num_actor_inputs=num_actor_inputs,
             num_actor_outputs=len(JOINT_BIASES),
             num_critic_inputs=num_critic_inputs,
@@ -1093,32 +1151,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
     ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
-        joint_pos_n = observations["joint_position_observation"]
-        joint_vel_n = observations["joint_velocity_observation"]
-        projected_gravity_3 = observations["projected_gravity_observation"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
-        lin_vel_cmd = commands["unified_command"][..., :2]
-        ang_vel_cmd = commands["unified_command"][..., 2:3]
-        base_height_cmd = commands["unified_command"][..., 3:4]
-        base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
-        arms_cmd = commands["unified_command"][..., 6:16]
+        joint_pos_n = observations["noisy_joint_position"]
+        joint_vel_n = observations["noisy_joint_velocity"]
+        projected_gravity_3 = observations["noisy_imu_projected_gravity"]
+        imu_gyro_3 = observations["noisy_imu_gyro"]
+        cmd = commands["unified_command"]
+        zero_cmd = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
         obs = [
             joint_pos_n,  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             projected_gravity_3,  # 3
+            imu_gyro_3,  # 3
             zero_cmd,  # 1
-            lin_vel_cmd,  # 2
-            ang_vel_cmd,  # 1
-            base_height_cmd,  # 1
-            base_roll_pitch_cmd,  # 2
-            arms_cmd,  # 10
+            cmd,  # 16
         ]
-        if self.config.use_gyro:
-            obs += [
-                imu_gyro_3,  # 3
-            ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
         action, carry = model.forward(obs_n, carry)
@@ -1132,29 +1179,25 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
     ) -> tuple[Array, tuple[tuple[Array, ...], ...]]:
-        qpos_n = observations["qpos_observation"]
-        qvel_n = observations["qvel_observation"]
-        projected_gravity_3 = observations["projected_gravity_observation"]
-        imu_gyro_3 = observations["sensor_observation_imu_gyro"]
-        zero_cmd = (jnp.linalg.norm(commands["unified_command"][..., :3], axis=-1) < 1e-3)[..., None]
-        lin_vel_cmd = commands["unified_command"][..., :2]
-        ang_vel_cmd = commands["unified_command"][..., 2:3]
-        base_height_cmd = commands["unified_command"][..., 3:4]
-        base_roll_pitch_cmd = commands["unified_command"][..., 4:6]
-        arms_cmd = commands["unified_command"][..., 6:16]
+        qpos_n = observations["joint_position"]
+        qvel_n = observations["joint_velocity"]
+        projected_gravity_3 = observations["projected_gravity"]
+        imu_gyro_3 = observations["imu_gyro"]
+        cmd = commands["unified_command"]
+        zero_cmd = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
         # privileged obs
-        left_touch = observations["sensor_observation_left_foot_touch"]
-        right_touch = observations["sensor_observation_right_foot_touch"]
-        feet_position_6 = observations["feet_position_observation"]
-        base_position_3 = observations["base_position_observation"]
-        base_orientation_4 = observations["base_orientation_observation"]
-        com_inertia_n = observations["center_of_mass_inertia_observation"]
-        com_vel_n = observations["center_of_mass_velocity_observation"]
-        base_lin_vel_3 = observations["base_linear_velocity_observation"]
-        base_ang_vel_3 = observations["base_angular_velocity_observation"]
-        actuator_force_n = observations["actuator_force_observation"]
-        base_height = observations["base_height_observation"]
+        left_touch = observations["left_foot_touch"]
+        right_touch = observations["right_foot_touch"]
+        feet_position_6 = observations["feet_position"]
+        base_position_3 = observations["base_position"]
+        base_orientation_4 = observations["base_orientation"]
+        com_inertia_n = observations["center_of_mass_inertia"]
+        com_vel_n = observations["center_of_mass_velocity"]
+        base_lin_vel_3 = observations["base_linear_velocity"]
+        base_ang_vel_3 = observations["base_angular_velocity"]
+        actuator_force_n = observations["actuator_force"]
+        base_height = observations["base_height"]
 
         obs_n = jnp.concatenate(
             [
@@ -1162,13 +1205,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 qpos_n,
                 qvel_n / 10.0,
                 projected_gravity_3,
-                zero_cmd,
-                lin_vel_cmd,
-                ang_vel_cmd,
-                base_height_cmd,
-                base_roll_pitch_cmd,
-                arms_cmd,
                 imu_gyro_3,
+                zero_cmd,
+                cmd,
                 # privileged obs:
                 left_touch,
                 right_touch,
@@ -1226,9 +1265,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=self.mirror_cmd(transition.command),
             carry=actor_c_m,
         )
-        unmirrored_actor_dist = self.unmirror_action(mirrored_actor_dist.mean())
+        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
         action_mirror_loss = (
-            jnp.mean((actor_dist.mean() - unmirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
+            jnp.mean((actor_dist.mean() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
         )
 
         mirrored_value, next_critic_c_m = self.run_critic(
@@ -1313,8 +1352,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model_carry: tuple[Array, Array],
         physics_model: ksim.PhysicsModel,
         physics_state: ksim.PhysicsState,
-        observations: xax.FrozenDict[str, Array],
-        commands: xax.FrozenDict[str, Array],
+        observations: xax.FrozenDict[str, PyTree],
+        commands: xax.FrozenDict[str, PyTree],
+        curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
@@ -1351,74 +1391,91 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
-        joint_pos_n_m = self.mirror_joints(obs["joint_position_observation"])
-        joint_vel_n_m = self.mirror_joints(obs["joint_velocity_observation"])
-        imu_gyro_3_m = jnp.concatenate(
+        noisy_joint_pos_m = self.mirror_joints(obs["noisy_joint_position"])
+        noisy_joint_vel_m = self.mirror_joints(obs["noisy_joint_velocity"])
+        noisy_imu_gyro_m = jnp.concatenate(
             [
-                -obs["sensor_observation_imu_gyro"][..., 0:1],
-                obs["sensor_observation_imu_gyro"][..., 1:2],
-                -obs["sensor_observation_imu_gyro"][..., 2:3],
+                -obs["noisy_imu_gyro"][..., 0:1],
+                obs["noisy_imu_gyro"][..., 1:2],
+                -obs["noisy_imu_gyro"][..., 2:3],
             ],
             axis=-1,
         )
-        projected_gravity_3_m = jnp.concatenate(
+        noisy_imu_projected_gravity_m = jnp.concatenate(
             [
-                -obs["projected_gravity_observation"][..., 0:1],
-                obs["projected_gravity_observation"][..., 1:2],
-                -obs["projected_gravity_observation"][..., 2:3],
+                -obs["noisy_imu_projected_gravity"][..., 0:1],
+                obs["noisy_imu_projected_gravity"][..., 1:2],
+                -obs["noisy_imu_projected_gravity"][..., 2:3],
             ],
             axis=-1,
         )
 
         # critic obs
-        qpos_m = self.mirror_joints(obs["qpos_observation"])
-        qvel_m = self.mirror_joints(obs["qvel_observation"])
-        left_touch_m = obs["sensor_observation_right_foot_touch"]  # flip left and right
-        right_touch_m = obs["sensor_observation_left_foot_touch"]  # flip left and right
-        feet_position_6_m = jnp.concatenate(
+        joint_pos_m = self.mirror_joints(obs["joint_position"])
+        joint_vel_m = self.mirror_joints(obs["joint_velocity"])
+        imu_gyro_m = jnp.concatenate(
             [
-                obs["feet_position_observation"][..., 3:4],  # left x = right x
-                -obs["feet_position_observation"][..., 4:5],  # left y = -right y
-                obs["feet_position_observation"][..., 5:6],  # left z = right z
-                obs["feet_position_observation"][..., 0:1],  # right x = left x
-                -obs["feet_position_observation"][..., 1:2],  # right y = -left y
-                obs["feet_position_observation"][..., 2:3],  # right z = left z
+                -obs["imu_gyro"][..., 0:1],
+                obs["imu_gyro"][..., 1:2],
+                -obs["imu_gyro"][..., 2:3],
             ],
             axis=-1,
         )
-        base_position_3_m = obs["base_position_observation"]  # no mirror because global frame
-        base_orientation_4_m = jnp.concatenate(
+        projected_gravity_m = jnp.concatenate(
             [
-                obs["base_orientation_observation"][..., 0:1],
-                -obs["base_orientation_observation"][..., 1:2],
-                -obs["base_orientation_observation"][..., 2:3],
-                obs["base_orientation_observation"][..., 3:4],
+                -obs["projected_gravity"][..., 0:1],
+                obs["projected_gravity"][..., 1:2],
+                -obs["projected_gravity"][..., 2:3],
+            ],
+            axis=-1,
+        )
+
+        left_touch_m = obs["right_foot_touch"]  # flip left and right
+        right_touch_m = obs["left_foot_touch"]  # flip left and right
+        feet_position_m = jnp.concatenate(
+            [
+                obs["feet_position"][..., 3:4],  # left x = right x
+                -obs["feet_position"][..., 4:5],  # left y = -right y
+                obs["feet_position"][..., 5:6],  # left z = right z
+                obs["feet_position"][..., 0:1],  # right x = left x
+                -obs["feet_position"][..., 1:2],  # right y = -left y
+                obs["feet_position"][..., 2:3],  # right z = left z
+            ],
+            axis=-1,
+        )
+        base_position_m = obs["base_position"]  # no mirror because global frame
+        base_orientation_m = jnp.concatenate(
+            [
+                obs["base_orientation"][..., 0:1],
+                -obs["base_orientation"][..., 1:2],
+                -obs["base_orientation"][..., 2:3],
+                obs["base_orientation"][..., 3:4],
             ],
             axis=-1,
         )
 
         # NOTE very unsure about COM mirror correctness
-        cinert = obs["center_of_mass_inertia_observation"].reshape(-1, 10)
+        com_inertia_m = obs["center_of_mass_inertia"].reshape(-1, 10)
         # Fields (MuJoCo cinert): [m, m*cx, m*cy, m*cz, Ixx, Iyy, Izz, Ixy, Ixz, Iyz]
-        cinert_m = jnp.concatenate(
+        com_inertia_m = jnp.concatenate(
             [
-                cinert[..., 0:1],  # m
-                cinert[..., 1:2],  # m*cx
-                -cinert[..., 2:3],  # m*cy -> flip
-                cinert[..., 3:4],  # m*cz
-                cinert[..., 4:5],  # Ixx
-                cinert[..., 5:6],  # Iyy
-                cinert[..., 6:7],  # Izz
-                -cinert[..., 7:8],  # Ixy -> flip
-                cinert[..., 8:9],  # Ixz
-                -cinert[..., 9:10],  # Iyz -> flip
+                com_inertia_m[..., 0:1],  # m
+                com_inertia_m[..., 1:2],  # m*cx
+                -com_inertia_m[..., 2:3],  # m*cy -> flip
+                com_inertia_m[..., 3:4],  # m*cz
+                com_inertia_m[..., 4:5],  # Ixx
+                com_inertia_m[..., 5:6],  # Iyy
+                com_inertia_m[..., 6:7],  # Izz
+                -com_inertia_m[..., 7:8],  # Ixy -> flip
+                com_inertia_m[..., 8:9],  # Ixz
+                -com_inertia_m[..., 9:10],  # Iyz -> flip
             ],
             axis=-1,
-        ).reshape(obs["center_of_mass_inertia_observation"].shape)
+        ).reshape(obs["center_of_mass_inertia"].shape)
 
         # mirror COM velocity across sagittal plane
         # Assume per-body layout [vx, vy, vz, wx, wy, wz]
-        cvel = obs["center_of_mass_velocity_observation"].reshape(-1, 6)
+        cvel = obs["center_of_mass_velocity"].reshape(-1, 6)
         lin = cvel[..., 0:3]
         ang = cvel[..., 3:6]
         lin_m = jnp.concatenate(
@@ -1437,47 +1494,49 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ],
             axis=-1,
         )
-        cvel_m = jnp.concatenate([lin_m, ang_m], axis=-1).reshape(obs["center_of_mass_velocity_observation"].shape)
+        cvel_m = jnp.concatenate([lin_m, ang_m], axis=-1).reshape(obs["center_of_mass_velocity"].shape)
 
-        base_lin_vel_3_m = jnp.concatenate(
+        base_lin_vel_m = jnp.concatenate(
             [
-                obs["base_linear_velocity_observation"][..., 0:1],
-                -obs["base_linear_velocity_observation"][..., 1:2],
-                obs["base_linear_velocity_observation"][..., 2:3],
+                obs["base_linear_velocity"][..., 0:1],
+                -obs["base_linear_velocity"][..., 1:2],
+                obs["base_linear_velocity"][..., 2:3],
             ],
             axis=-1,
         )
-        base_ang_vel_3_m = jnp.concatenate(
+        base_ang_vel_m = jnp.concatenate(
             [
-                -obs["base_angular_velocity_observation"][..., 0:1],
-                obs["base_angular_velocity_observation"][..., 1:2],
-                -obs["base_angular_velocity_observation"][..., 2:3],
+                -obs["base_angular_velocity"][..., 0:1],
+                obs["base_angular_velocity"][..., 1:2],
+                -obs["base_angular_velocity"][..., 2:3],
             ],
             axis=-1,
         )
 
-        actuator_force_m = self.mirror_joints(obs["actuator_force_observation"])
-        base_height_m = obs["base_height_observation"]
+        actuator_force_m = self.mirror_joints(obs["actuator_force"])
+        base_height_m = obs["base_height"]
 
         obs_m = xax.FrozenDict(
             {
-                "joint_position_observation": joint_pos_n_m,
-                "joint_velocity_observation": joint_vel_n_m,
-                "sensor_observation_imu_gyro": imu_gyro_3_m,
-                "projected_gravity_observation": projected_gravity_3_m,
-                "qpos_observation": qpos_m,
-                "qvel_observation": qvel_m,
-                "sensor_observation_left_foot_touch": left_touch_m,
-                "sensor_observation_right_foot_touch": right_touch_m,
-                "feet_position_observation": feet_position_6_m,
-                "base_position_observation": base_position_3_m,
-                "base_orientation_observation": base_orientation_4_m,
-                "center_of_mass_inertia_observation": cinert_m,
-                "center_of_mass_velocity_observation": cvel_m,
-                "base_linear_velocity_observation": base_lin_vel_3_m,
-                "base_angular_velocity_observation": base_ang_vel_3_m,
-                "actuator_force_observation": actuator_force_m,
-                "base_height_observation": base_height_m,
+                "noisy_joint_position": noisy_joint_pos_m,
+                "noisy_joint_velocity": noisy_joint_vel_m,
+                "noisy_imu_gyro": noisy_imu_gyro_m,
+                "noisy_imu_projected_gravity": noisy_imu_projected_gravity_m,
+                "joint_position": joint_pos_m,
+                "joint_velocity": joint_vel_m,
+                "imu_gyro": imu_gyro_m,
+                "projected_gravity": projected_gravity_m,
+                "left_foot_touch": left_touch_m,
+                "right_foot_touch": right_touch_m,
+                "feet_position": feet_position_m,
+                "base_position": base_position_m,
+                "base_orientation": base_orientation_m,
+                "center_of_mass_inertia": com_inertia_m,
+                "center_of_mass_velocity": cvel_m,
+                "base_linear_velocity": base_lin_vel_m,
+                "base_angular_velocity": base_ang_vel_m,
+                "actuator_force": actuator_force_m,
+                "base_height": base_height_m,
             }
         )
         return obs_m
@@ -1505,10 +1564,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         return xax.FrozenDict({"unified_command": cmd_u_m})
 
-    def unmirror_action(self, action: ksim.Action) -> ksim.Action:
-        action_m = self.mirror_joints(action)
-        return action_m
-
 
 if __name__ == "__main__":
     HumanoidWalkingTask.launch(
@@ -1517,9 +1572,9 @@ if __name__ == "__main__":
             num_envs=4096,
             batch_size=512,
             num_passes=3,
-            epochs_per_log_step=1,
+            # epochs_per_log_step=1,
             rollout_length_seconds=2.0,
-            global_grad_clip=2.0,
+            # global_grad_clip=2.0,
             entropy_coef=0.002,
             learning_rate=5e-4,
             gamma=0.9,
@@ -1538,7 +1593,7 @@ if __name__ == "__main__":
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
-            render_full_every_n_seconds=0,
+            # render_full_every_n_seconds=0,
             render_length_seconds=10,
             max_values_per_plot=50,
             # Checkpointing parameters.

@@ -63,25 +63,17 @@ def main() -> None:
         # pad command to 16 regardless of num_commands
         command = jnp.pad(command, (0, 16 - command.shape[-1]), mode="constant", constant_values=0)
 
-        cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
-        cmd_vel = command[..., :2]
-        cmd_yaw_rate = command[..., 2:3]
-        cmd_body_height = command[..., 3:4]
-        cmd_body_orientation = command[..., 4:6]
-        cmd_arms = command[..., 6:]
+        cmd = command[..., :num_commands]
+        cmd_zero = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
         obs = jnp.concatenate(
             [
                 joint_angles,
                 joint_angular_velocities,
                 projected_gravity,
-                cmd_zero,
-                cmd_vel,
-                cmd_yaw_rate,
-                cmd_body_height,
-                cmd_body_orientation,
-                cmd_arms,
                 gyroscope,
+                cmd_zero,
+                cmd,
             ],
             axis=-1,
         )
