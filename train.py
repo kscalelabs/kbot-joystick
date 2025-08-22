@@ -239,7 +239,7 @@ class ArmPositionReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         qpos_sel = trajectory.qpos[..., jnp.array(self.joint_indices) + 7]
         target = trajectory.command["unified_command"][..., 6:16] + self.joint_biases
-        error = jnp.linalg.norm(qpos_sel - target, axis=-1)
+        error = xax.get_norm(qpos_sel - target, norm="l2").sum(axis=-1)
         return jnp.exp(-error / self.error_scale)
 
 
@@ -1311,7 +1311,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             scan_fn,
             model_carry,
             (trajectory, jax.random.split(rng, len(trajectory.done))),
-            jit_level=4,
+            jit_level=ksim.JitLevel.RL_CORE,
         )
         return ppo_variables, next_model_carry
 
