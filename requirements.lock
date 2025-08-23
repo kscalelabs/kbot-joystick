@@ -110,8 +110,8 @@ mistune==3.1.3
 ml_dtypes==0.5.1
 mpmath==1.3.0
 msgpack==1.1.0
-mujoco==3.3.2
-mujoco-mjx==3.3.2
+mujoco==3.3.5
+mujoco-mjx==3.3.5
 -e git+https://github.com/b-vm/mujoco-scenes@eee54b1cb88acef1776606ef07b0ecb706dbc033#egg=mujoco_scenes
 multidict==6.4.3
 namex==0.0.9
