@@ -695,6 +695,7 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
+    num_mixtures: int = eqx.field()
     clip_positions: ksim.ClipPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
@@ -707,9 +708,10 @@ class Actor(eqx.Module):
         physics_model: ksim.PhysicsModel,
         num_inputs: int,
         num_outputs: int,
-        min_std: float,
-        max_std: float,
-        var_scale: float,
+        num_mixtures: int = 5,
+        min_std: float = 0.01,
+        max_std: float = 1.0,
+        var_scale: float = 0.5,
         hidden_size: int,
         depth: int,
     ) -> None:
@@ -735,15 +737,17 @@ class Actor(eqx.Module):
             ]
         )
 
-        # Project to output - mean and std for each action
+        # Project to output - mean, std, and logits for each mixture component
+        total_outputs = num_outputs * num_mixtures * 3  # mean, std, and logits for each component
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=num_outputs * 2,  # mean and std for each output
+            out_features=total_outputs,
             key=key,
         )
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
+        self.num_mixtures = num_mixtures
         self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
@@ -751,7 +755,7 @@ class Actor(eqx.Module):
 
     def forward(
         self, obs_n: Array, carry: tuple[tuple[Array, Array], ...]
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, Array], ...]]:
+    ) -> tuple[xax.Distribution, tuple[tuple[Array, Array], ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -760,21 +764,28 @@ class Actor(eqx.Module):
             x_n = h
         out_n = self.output_proj(h)
 
-        # Split into means and stds
-        mean_n = out_n[..., : self.num_outputs]
-        std_n = out_n[..., self.num_outputs :]
+        # Split into means, stds, and logits for each mixture component
+        slice_len = self.num_outputs * self.num_mixtures
+        mean_nm = out_n[:slice_len].reshape(self.num_outputs, self.num_mixtures)
+        std_nm = out_n[slice_len:2*slice_len].reshape(self.num_outputs, self.num_mixtures)
+        logits_nm = out_n[2*slice_len:].reshape(self.num_outputs, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations
-        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
+        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means
         arm_cmd_bias = jnp.concatenate([obs_n[..., -10:], jnp.zeros(shape=(10,))], axis=-1)
-        mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
+        joint_biases = jnp.array([v for _, v in JOINT_BIASES])
+        mean_nm = mean_nm + joint_biases[:, None] + arm_cmd_bias[..., None]
 
-        # Create diagonal gaussian distribution
-        dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
+        # Create mixture of gaussians distribution
+        dist = xax.MixtureOfGaussians(
+            means_nm=mean_nm,
+            stds_nm=std_nm,
+            logits_nm=logits_nm,
+        )
 
-        return dist_n, tuple(out_carries)
+        return dist, tuple(out_carries)
 
 
 class Critic(eqx.Module):
@@ -857,6 +868,7 @@ class Model(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        num_mixtures: int = 5,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -869,6 +881,7 @@ class Model(eqx.Module):
             var_scale=var_scale,
             hidden_size=hidden_size,
             depth=depth,
+            num_mixtures=num_mixtures,
         )
         self.critic = Critic(
             critic_key,
@@ -1260,9 +1273,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=self.mirror_cmd(transition.command),
             carry=actor_c_m,
         )
-        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
+        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mode())
         action_mirror_loss = (
-            jnp.mean((actor_dist.mean() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
+            jnp.mean((actor_dist.mode() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
         )
 
         mirrored_value, next_critic_c_m = self.run_critic(
@@ -1274,10 +1287,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
-            log_probs=jnp.expand_dims(log_probs, axis=0),
+            # log_probs=jnp.expand_dims(log_probs, axis=0),
+            log_probs=log_probs,
             values=value.squeeze(-1),
-            entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
-            action_std=actor_dist.stddev(),
+            # entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
+            entropy=actor_dist.entropy(),
+            # action_std=actor_dist.stddev(),
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1349,7 +1364,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=commands,
             carry=model_carry["actor"],
         )
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
         return ksim.Action(
             action=action_j,
             carry={
