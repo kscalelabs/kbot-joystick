@@ -200,6 +200,7 @@ tensorstore==0.1.75
 termcolor==3.1.0
 terminado==0.18.1
 tf2onnx==1.16.1
+tf_keras==2.19.0
 tinycss2==1.4.0
 toolz==1.0.0
 tornado==6.5
