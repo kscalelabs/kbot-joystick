@@ -555,7 +555,7 @@ class UnifiedCommand(ksim.Command):
     bh_range: tuple[float, float] = attrs.field()
     rx_range: tuple[float, float] = attrs.field()
     ry_range: tuple[float, float] = attrs.field()
-    arms_range: tuple[list[float], list[float]] = attrs.field()
+    arms_range: tuple[tuple[float, ...], ...] = attrs.field()
     ctrl_dt: float = attrs.field()
     switch_prob: float = attrs.field()
 
@@ -758,8 +758,8 @@ class Actor(eqx.Module):
         self.var_scale = var_scale
 
     def forward(
-        self, obs_n: Array, carry: tuple[tuple[Array, Array], ...]
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, Array], ...]]:
+        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...]
+    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -837,7 +837,7 @@ class Critic(eqx.Module):
         self.num_inputs = num_inputs
 
     def forward(
-        self, obs_n: Array, carry: tuple[tuple[Array, Array], ...]
+        self, obs_n: Array, carry: tuple[tuple[Array, ...], ...]
     ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
@@ -1518,7 +1518,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         actuator_force_m = self.mirror_joints(obs["actuator_force"])
         base_height_m = obs["base_height"]
 
-        obs_m = xax.FrozenDict(
+        return xax.FrozenDict(
             {
                 "noisy_joint_position": noisy_joint_pos_m,
                 "noisy_joint_velocity": noisy_joint_vel_m,
@@ -1541,7 +1541,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 "base_height": base_height_m,
             }
         )
-        return obs_m
 
     def mirror_cmd(self, cmd: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         cmd_u = cmd["unified_command"]
