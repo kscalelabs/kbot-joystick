@@ -91,10 +91,6 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.01,
         help="Scale for the critic mirror loss",
     )
-    num_mixtures: int = xax.field(
-        value=5,
-        help="Number of mixtures for the actor",
-    )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -699,7 +695,6 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
-    num_mixtures: int = eqx.field()
     clip_positions: ksim.ClipPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
@@ -712,7 +707,6 @@ class Actor(eqx.Module):
         physics_model: ksim.PhysicsModel,
         num_inputs: int,
         num_outputs: int,
-        num_mixtures: int,
         min_std: float,
         max_std: float,
         var_scale: float,
@@ -741,25 +735,23 @@ class Actor(eqx.Module):
             ]
         )
 
-        # Project to output - mean, std, and logits for each mixture component
-        total_outputs = num_outputs * num_mixtures * 3
+        # Project to output - mean and std for each action
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
-            out_features=total_outputs,
+            out_features=num_outputs * 2,  # mean and std for each output
             key=key,
         )
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.num_mixtures = num_mixtures
         self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
 
     def forward(
-        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...]
-    ) -> tuple[xax.Distribution, tuple[tuple[Array, ...], ...]]:
+        self, obs_n: Array, carry: tuple[tuple[Array, ...], ...]
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -768,23 +760,21 @@ class Actor(eqx.Module):
             x_n = h
         out_n = self.output_proj(h)
 
-        # Split into means, stds, and logits for each mixture component
-        slice_len = self.num_outputs * self.num_mixtures
-        mean_nm = out_n[:slice_len].reshape(self.num_outputs, self.num_mixtures)
-        std_nm = out_n[slice_len : 2 * slice_len].reshape(self.num_outputs, self.num_mixtures)
-        logits_nm = out_n[2 * slice_len :].reshape(self.num_outputs, self.num_mixtures)
+        # Split into means and stds
+        mean_n = out_n[..., : self.num_outputs]
+        std_n = out_n[..., self.num_outputs :]
 
         # Softplus and clip to ensure positive standard deviations
-        std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
+        std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means
         arm_cmd_bias = jnp.concatenate([obs_n[..., -10:], jnp.zeros(shape=(10,))], axis=-1)
-        joint_biases = jnp.array([v for _, v in JOINT_BIASES])
-        mean_nm = mean_nm + joint_biases[:, None] + arm_cmd_bias[..., None]
+        mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
 
-        dist = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
+        # Create diagonal gaussian distribution
+        dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
 
-        return dist, tuple(out_carries)
+        return dist_n, tuple(out_carries)
 
 
 class Critic(eqx.Module):
@@ -862,7 +852,6 @@ class Model(eqx.Module):
         num_actor_inputs: int,
         num_actor_outputs: int,
         num_critic_inputs: int,
-        num_mixtures: int,
         min_std: float,
         max_std: float,
         var_scale: float,
@@ -875,7 +864,6 @@ class Model(eqx.Module):
             physics_model=physics_model,
             num_inputs=num_actor_inputs,
             num_outputs=num_actor_outputs,
-            num_mixtures=num_mixtures,
             min_std=min_std,
             max_std=max_std,
             var_scale=var_scale,
@@ -1150,7 +1138,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
-            num_mixtures=self.config.num_mixtures,
+
         )
 
     def run_actor(
@@ -1273,9 +1261,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=self.mirror_cmd(transition.command),
             carry=actor_c_m,
         )
-        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mode())
+        double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
         action_mirror_loss = (
-            jnp.mean((actor_dist.mode() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
+            jnp.mean((actor_dist.mean() - double_mirrored_actor_dist) ** 2) * self.config.actor_mirror_loss_scale
         )
 
         mirrored_value, next_critic_c_m = self.run_critic(
@@ -1287,9 +1275,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
-            log_probs=log_probs,
+            log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
-            entropy=actor_dist.entropy(),
+            entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
+            action_std=actor_dist.stddev(),
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1361,7 +1350,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             commands=commands,
             carry=model_carry["actor"],
         )
-        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(rng)
+        action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(
             action=action_j,
             carry={
