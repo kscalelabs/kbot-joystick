@@ -62,6 +62,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.5,
         help="The scale for the standard deviations of the actor.",
     )
+    cutoff_frequency: float = xax.field(
+        value=4.0,
+        help="The cutoff frequency for the low-pass filter.",
+    )
     # Optimizer parameters.
     learning_rate: float = xax.field(
         value=5e-4,
@@ -695,10 +699,11 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
-    clip_positions: ksim.ClipPositions = eqx.field()
+    clip_positions: ksim.TanhPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
+    cutoff_frequency: float = eqx.field()
 
     def __init__(
         self,
@@ -712,6 +717,7 @@ class Actor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        cutoff_frequency: float,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -744,14 +750,15 @@ class Actor(eqx.Module):
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
+        self.clip_positions = ksim.TanhPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.cutoff_frequency = cutoff_frequency
 
     def forward(
-        self, obs_n: Array, carry: tuple[tuple[Array, ...], ...]
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
+        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...], lpf_params: ksim.LowPassFilterParams
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -771,10 +778,16 @@ class Actor(eqx.Module):
         arm_cmd_bias = jnp.concatenate([obs_n[..., -10:], jnp.zeros(shape=(10,))], axis=-1)
         mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
 
+        # Clip the target positions to the minimum and maximum ranges.
+        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now
+
+        # Apply low-pass filter
+        mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, 0.02, self.cutoff_frequency, lpf_params)  # ctrl_dt is 0.02 # TODO get dt
+
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
 
-        return dist_n, tuple(out_carries)
+        return dist_n, tuple(out_carries), lpf_params
 
 
 class Critic(eqx.Module):
@@ -857,6 +870,7 @@ class Model(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        cutoff_frequency: float,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -869,6 +883,7 @@ class Model(eqx.Module):
             var_scale=var_scale,
             hidden_size=hidden_size,
             depth=depth,
+            cutoff_frequency=cutoff_frequency,
         )
         self.critic = Critic(
             critic_key,
@@ -883,7 +898,7 @@ class Carry(TypedDict):
     actor_mirror: tuple[tuple[Array, Array], ...]
     critic: tuple[tuple[Array, Array], ...]
     critic_mirror: tuple[tuple[Array, Array], ...]
-    filter_params: ksim.ClipAccelerationParams
+    lpf_params: ksim.LowPassFilterParams
 
 
 class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
@@ -1138,7 +1153,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
-
+            cutoff_frequency=self.config.cutoff_frequency,
         )
 
     def run_actor(
@@ -1147,7 +1162,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
+        lpf_params: ksim.LowPassFilterParams,
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         joint_pos_n = observations["noisy_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
@@ -1165,9 +1181,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
-        action, carry = model.forward(obs_n, carry)
+        action, carry, lpf_params = model.forward(obs_n, carry, lpf_params)
 
-        return action, carry
+        return action, carry, lpf_params
 
     def run_critic(
         self,
@@ -1236,11 +1252,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         actor_c_m = carry["actor_mirror"]
         critic_c_m = carry["critic_mirror"]
 
-        actor_dist, next_actor_c = self.run_actor(
+        actor_dist, next_actor_c, next_lpf_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
             carry=actor_c,
+            lpf_params=carry["lpf_params"],
         )
 
         # Gets the log probabilities of the action.
@@ -1255,11 +1272,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
         # compute mirror losses
-        mirrored_actor_dist, next_actor_c_m = self.run_actor(
+        mirrored_actor_dist, next_actor_c_m, _ = self.run_actor(
             model=model.actor,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
             carry=actor_c_m,
+            lpf_params=carry["lpf_params"],
         )
         double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
         action_mirror_loss = (
@@ -1290,7 +1308,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "critic": next_critic_c,
             "actor_mirror": next_actor_c_m,
             "critic_mirror": next_critic_c_m,
-            # TODO filter thing
+            "lpf_params": next_lpf_params,
         }
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
@@ -1328,8 +1346,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     for _ in range(self.config.depth)
                 )
                 for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
-            }
-            # "filter_params": ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in JOINT_BIASES])),
+            },
+            "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
         }
 
     def sample_action(
@@ -1344,11 +1362,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        action_dist_j, actor_carry = self.run_actor(
+        action_dist_j, actor_carry, next_lpf_params = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
             carry=model_carry["actor"],
+            lpf_params=model_carry["lpf_params"],
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(
@@ -1356,6 +1375,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry={
                 **model_carry,
                 "actor": actor_carry,
+                "lpf_params": next_lpf_params,
             },
         )
 
