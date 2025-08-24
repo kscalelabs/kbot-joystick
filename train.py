@@ -91,6 +91,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         value=0.01,
         help="Scale for the critic mirror loss",
     )
+    num_mixtures: int = xax.field(
+        value=5,
+        help="Number of mixtures for the actor",
+    )
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -708,10 +712,10 @@ class Actor(eqx.Module):
         physics_model: ksim.PhysicsModel,
         num_inputs: int,
         num_outputs: int,
-        num_mixtures: int = 5,
-        min_std: float = 0.01,
-        max_std: float = 1.0,
-        var_scale: float = 0.5,
+        num_mixtures: int,
+        min_std: float,
+        max_std: float,
+        var_scale: float,
         hidden_size: int,
         depth: int,
     ) -> None:
@@ -738,7 +742,7 @@ class Actor(eqx.Module):
         )
 
         # Project to output - mean, std, and logits for each mixture component
-        total_outputs = num_outputs * num_mixtures * 3  # mean, std, and logits for each component
+        total_outputs = num_outputs * num_mixtures * 3
         self.output_proj = eqx.nn.Linear(
             in_features=hidden_size,
             out_features=total_outputs,
@@ -767,8 +771,8 @@ class Actor(eqx.Module):
         # Split into means, stds, and logits for each mixture component
         slice_len = self.num_outputs * self.num_mixtures
         mean_nm = out_n[:slice_len].reshape(self.num_outputs, self.num_mixtures)
-        std_nm = out_n[slice_len:2*slice_len].reshape(self.num_outputs, self.num_mixtures)
-        logits_nm = out_n[2*slice_len:].reshape(self.num_outputs, self.num_mixtures)
+        std_nm = out_n[slice_len : 2 * slice_len].reshape(self.num_outputs, self.num_mixtures)
+        logits_nm = out_n[2 * slice_len :].reshape(self.num_outputs, self.num_mixtures)
 
         # Softplus and clip to ensure positive standard deviations
         std_nm = jnp.clip((jax.nn.softplus(std_nm) + self.min_std) * self.var_scale, max=self.max_std)
@@ -778,12 +782,7 @@ class Actor(eqx.Module):
         joint_biases = jnp.array([v for _, v in JOINT_BIASES])
         mean_nm = mean_nm + joint_biases[:, None] + arm_cmd_bias[..., None]
 
-        # Create mixture of gaussians distribution
-        dist = xax.MixtureOfGaussians(
-            means_nm=mean_nm,
-            stds_nm=std_nm,
-            logits_nm=logits_nm,
-        )
+        dist = xax.MixtureOfGaussians(means_nm=mean_nm, stds_nm=std_nm, logits_nm=logits_nm)
 
         return dist, tuple(out_carries)
 
@@ -863,12 +862,12 @@ class Model(eqx.Module):
         num_actor_inputs: int,
         num_actor_outputs: int,
         num_critic_inputs: int,
+        num_mixtures: int,
         min_std: float,
         max_std: float,
         var_scale: float,
         hidden_size: int,
         depth: int,
-        num_mixtures: int = 5,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -876,12 +875,12 @@ class Model(eqx.Module):
             physics_model=physics_model,
             num_inputs=num_actor_inputs,
             num_outputs=num_actor_outputs,
+            num_mixtures=num_mixtures,
             min_std=min_std,
             max_std=max_std,
             var_scale=var_scale,
             hidden_size=hidden_size,
             depth=depth,
-            num_mixtures=num_mixtures,
         )
         self.critic = Critic(
             critic_key,
@@ -1151,6 +1150,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            num_mixtures=self.config.num_mixtures,
         )
 
     def run_actor(
@@ -1287,12 +1287,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
         transition_ppo_variables = ksim.PPOVariables(
-            # log_probs=jnp.expand_dims(log_probs, axis=0),
             log_probs=log_probs,
             values=value.squeeze(-1),
-            # entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
             entropy=actor_dist.entropy(),
-            # action_std=actor_dist.stddev(),
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
