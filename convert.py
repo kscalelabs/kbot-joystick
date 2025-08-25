@@ -2,6 +2,7 @@
 
 import argparse
 from pathlib import Path
+from typing import cast
 
 import jax
 import jax.numpy as jnp
@@ -31,10 +32,10 @@ def main() -> None:
         raise FileNotFoundError(f"Checkpoint path {ckpt_path} does not exist")
 
     task: HumanoidWalkingTask = HumanoidWalkingTask.load_task(ckpt_path)
-    model: Model = task.load_ckpt(ckpt_path, part="model")[0]
-
-    # Loads the Mujoco model and gets the joint names.
     mujoco_model = task.get_mujoco_model()
+    init_params = ksim.InitParams(key=jax.random.PRNGKey(0), physics_model=mujoco_model)
+    model = cast(Model, task.load_ckpt(ckpt_path, init_params=init_params, part="model")[0])
+
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
@@ -61,9 +62,8 @@ def main() -> None:
         carry: Array,
     ) -> tuple[Array, Array]:
         # pad command to 16 regardless of num_commands
-        command = jnp.pad(command, (0, 16 - command.shape[-1]), mode="constant", constant_values=0)
+        cmd = jnp.pad(command, (0, 16 - command.shape[-1]), mode="constant", constant_values=0)[..., :16]
 
-        cmd = command[..., :num_commands]
         cmd_zero = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
         obs = jnp.concatenate(
