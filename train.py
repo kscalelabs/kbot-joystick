@@ -1339,7 +1339,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        return {
+        return Carry(**{
             **{
                 name: tuple(
                     (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
@@ -1348,7 +1348,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
             },
             "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
-        }
+        })
 
     def sample_action(
         self,
