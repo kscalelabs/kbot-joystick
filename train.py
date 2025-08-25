@@ -1556,9 +1556,7 @@ if __name__ == "__main__":
             num_envs=4096,
             batch_size=512,
             num_passes=3,
-            # epochs_per_log_step=1,
             rollout_length_seconds=2.0,
-            # global_grad_clip=2.0,
             entropy_coef=0.002,
             learning_rate=5e-4,
             gamma=0.9,
@@ -1576,7 +1574,6 @@ if __name__ == "__main__":
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
-            # render_full_every_n_seconds=0,
             render_length_seconds=10,
             max_values_per_plot=50,
             # Checkpointing parameters.
