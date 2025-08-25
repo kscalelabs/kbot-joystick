@@ -827,7 +827,7 @@ class Critic(eqx.Module):
         self.num_inputs = num_inputs
 
     def forward(
-        self, obs_n: Array, carry: tuple[tuple[Array, ...], ...]
+        self, obs_n: Array, carry: Array |tuple[tuple[Array, ...], ...]
     ) -> tuple[Array, tuple[tuple[Array, Array], ...]]:
         x_n = self.input_proj(obs_n)
         out_carries = []
@@ -1318,14 +1318,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        carry_dict = {
+        return {
             name: tuple(
                 (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
                 for _ in range(self.config.depth)
             )
             for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
         }
-        return carry_dict
 
     def sample_action(
         self,
@@ -1335,7 +1334,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
-        curriculum_level: Array,
+        # curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
