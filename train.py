@@ -1476,9 +1476,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         noisy_imu_projected_gravity_m = jnp.concatenate(
             [
-                -obs["noisy_imu_projected_gravity"][..., 0:1],
-                obs["noisy_imu_projected_gravity"][..., 1:2],
-                -obs["noisy_imu_projected_gravity"][..., 2:3],
+                obs["noisy_imu_projected_gravity"][..., 0:1],
+                -obs["noisy_imu_projected_gravity"][..., 1:2],
+                obs["noisy_imu_projected_gravity"][..., 2:3],
             ],
             axis=-1,
         )
