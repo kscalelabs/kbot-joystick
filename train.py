@@ -1318,7 +1318,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        return Carry(**{
+        return Carry(**{  # type: ignore[typeddict-item]
             name: tuple(
                 (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
                 for _ in range(self.config.depth)
