@@ -1496,9 +1496,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         projected_gravity_m = jnp.concatenate(
             [
-                -obs["projected_gravity"][..., 0:1],
-                obs["projected_gravity"][..., 1:2],
-                -obs["projected_gravity"][..., 2:3],
+                obs["projected_gravity"][..., 0:1],
+                -obs["projected_gravity"][..., 1:2],
+                obs["projected_gravity"][..., 2:3],
             ],
             axis=-1,
         )
@@ -1619,7 +1619,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             [
                 cmd_u[..., :1],  # x
                 -cmd_u[..., 1:2],  # y
-                -cmd_u[..., 2:3],  # z
+                -cmd_u[..., 2:3],  # wz
                 cmd_u[..., 3:4],  # base height
                 -cmd_u[..., 4:5],  # base roll
                 cmd_u[..., 5:6],  # base pitch
