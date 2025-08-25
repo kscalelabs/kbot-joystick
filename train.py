@@ -45,27 +45,28 @@ JOINT_BIASES: list[tuple[str, float]] = [
 ]
 
 JOINT_LIMITS = {
-    'dof_right_shoulder_pitch_03': (-3.1415929794311523, 1.3962630033493042),
-    'dof_right_shoulder_roll_03': (-1.6580630540847778, 0.34906598925590515),
-    'dof_right_shoulder_yaw_02': (-1.6580630540847778, 1.6580630540847778),
-    'dof_right_elbow_02': (0.0, 2.478368043899536),
-    'dof_right_wrist_00': (-1.7453290224075317, 1.7453290224075317),
-    'dof_left_shoulder_pitch_03': (-1.3962630033493042, 3.1415929794311523),
-    'dof_left_shoulder_roll_03': (-0.34906598925590515, 1.6580630540847778),
-    'dof_left_shoulder_yaw_02': (-1.6580630540847778, 1.6580630540847778),
-    'dof_left_elbow_02': (-2.478368043899536, 0.0),
-    'dof_left_wrist_00': (-1.7453290224075317, 1.7453290224075317),
-    'dof_right_hip_pitch_04': (-2.2165679931640625, 1.0471980571746826),
-    'dof_right_hip_roll_03': (-2.268928050994873, 0.20943999290466309),
-    'dof_right_hip_yaw_03': (-1.570796012878418, 1.570796012878418),
-    'dof_right_knee_04': (-2.7052600383758545, 0.0),
-    'dof_right_ankle_02': (-0.22689299285411835, 1.2566369771957397),
-    'dof_left_hip_pitch_04': (-1.0471980571746826, 2.2165679931640625),
-    'dof_left_hip_roll_03': (-0.20943999290466309, 2.268928050994873),
-    'dof_left_hip_yaw_03': (-1.570796012878418, 1.570796012878418),
-    'dof_left_knee_04': (0.0, 2.7052600383758545),
-    'dof_left_ankle_02': (-1.2566369771957397, 0.22689299285411835),
+    "dof_right_shoulder_pitch_03": (-3.1415929794311523, 1.3962630033493042),
+    "dof_right_shoulder_roll_03": (-1.6580630540847778, 0.34906598925590515),
+    "dof_right_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
+    "dof_right_elbow_02": (0.0, 2.478368043899536),
+    "dof_right_wrist_00": (-1.7453290224075317, 1.7453290224075317),
+    "dof_left_shoulder_pitch_03": (-1.3962630033493042, 3.1415929794311523),
+    "dof_left_shoulder_roll_03": (-0.34906598925590515, 1.6580630540847778),
+    "dof_left_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
+    "dof_left_elbow_02": (-2.478368043899536, 0.0),
+    "dof_left_wrist_00": (-1.7453290224075317, 1.7453290224075317),
+    "dof_right_hip_pitch_04": (-2.2165679931640625, 1.0471980571746826),
+    "dof_right_hip_roll_03": (-2.268928050994873, 0.20943999290466309),
+    "dof_right_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
+    "dof_right_knee_04": (-2.7052600383758545, 0.0),
+    "dof_right_ankle_02": (-0.22689299285411835, 1.2566369771957397),
+    "dof_left_hip_pitch_04": (-1.0471980571746826, 2.2165679931640625),
+    "dof_left_hip_roll_03": (-0.20943999290466309, 2.268928050994873),
+    "dof_left_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
+    "dof_left_knee_04": (0.0, 2.7052600383758545),
+    "dof_left_ankle_02": (-1.2566369771957397, 0.22689299285411835),
 }
+
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
@@ -726,6 +727,7 @@ class Actor(eqx.Module):
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
     cutoff_frequency: float = eqx.field()
+    ctrl_dt: float = eqx.field()
 
     def __init__(
         self,
@@ -740,6 +742,7 @@ class Actor(eqx.Module):
         hidden_size: int,
         depth: int,
         cutoff_frequency: float,
+        ctrl_dt: float,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -777,6 +780,7 @@ class Actor(eqx.Module):
         self.max_std = max_std
         self.var_scale = var_scale
         self.cutoff_frequency = cutoff_frequency
+        self.ctrl_dt = ctrl_dt
 
     def forward(
         self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...], lpf_params: ksim.LowPassFilterParams
@@ -801,10 +805,10 @@ class Actor(eqx.Module):
         mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
 
         # Clip the target positions to the minimum and maximum ranges.
-        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now - its bad 
+        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now - its bad
 
         # Apply low-pass filter
-        mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, 0.02, self.cutoff_frequency, lpf_params)  # ctrl_dt is 0.02 # TODO get dt
+        mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, self.cutoff_frequency, lpf_params)
 
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
@@ -893,6 +897,7 @@ class Model(eqx.Module):
         hidden_size: int,
         depth: int,
         cutoff_frequency: float,
+        ctrl_dt: float,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -906,6 +911,7 @@ class Model(eqx.Module):
             hidden_size=hidden_size,
             depth=depth,
             cutoff_frequency=cutoff_frequency,
+            ctrl_dt=ctrl_dt,
         )
         self.critic = Critic(
             critic_key,
@@ -1142,14 +1148,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            + 3  # projected gravity
+            + 5 # projected gravity
             + 3  # imu_gyro
             + num_commands
         )
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
-            + 3  # projected gravity
+            + 5  # projected gravity
             + 3  # imu gyro
             + num_commands
             + 2  # feet touch
@@ -1176,6 +1182,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
             cutoff_frequency=self.config.cutoff_frequency,
+            ctrl_dt=self.config.ctrl_dt,
         )
 
     def normalize_joint_pos(self, joint_pos: Array) -> Array:
@@ -1184,7 +1191,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         joint_biases = jnp.array([bias for _, bias in JOINT_BIASES])
         joint_min = jnp.array([JOINT_LIMITS[name][0] for name in joint_names])
         joint_max = jnp.array([JOINT_LIMITS[name][1] for name in joint_names])
-        
+
         # Calculate maximum range from bias for each joint
         range_negative = joint_biases - joint_min
         range_positive = joint_max - joint_biases
@@ -1192,6 +1199,22 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         # Normalize joint positions relative to bias, scaled by max range
         return (joint_pos - joint_biases) / max_range
+
+    def normalize_joint_vel(self, joint_vel: Array) -> Array:
+        return joint_vel / 10.0
+
+    def encode_projected_gravity(self, projected_gravity: Array) -> Array:
+        roll = jnp.arctan2(projected_gravity[1], -projected_gravity[2])
+        pitch = jnp.arctan2(-projected_gravity[0], jnp.sqrt(projected_gravity[1] ** 2 + projected_gravity[2] ** 2))
+        projected_gravity_unit = projected_gravity / jnp.linalg.norm(projected_gravity, axis=-1, keepdims=True)
+        return jnp.concatenate(
+            [
+                roll[..., None],
+                pitch[..., None],
+                projected_gravity_unit,
+            ],
+            axis=-1,
+        )
 
     def run_actor(
         self,
@@ -1208,11 +1231,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         cmd = commands["unified_command"]
         zero_cmd = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
-
         obs = [
             self.normalize_joint_pos(joint_pos_n),  # NUM_JOINTS
-            joint_vel_n,  # NUM_JOINTS
-            projected_gravity_3,  # 3
+            self.normalize_joint_vel(joint_vel_n),  # NUM_JOINTS
+            self.encode_projected_gravity(projected_gravity_3),  # 5
             imu_gyro_3,  # 3
             zero_cmd,  # 1
             cmd,  # 16
@@ -1254,8 +1276,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             [
                 # actor obs:
                 self.normalize_joint_pos(qpos_n),
-                qvel_n / 10.0,
-                projected_gravity_3,
+                self.normalize_joint_vel(qvel_n),
+                self.encode_projected_gravity(projected_gravity_3),
                 imu_gyro_3,
                 zero_cmd,
                 cmd,
@@ -1377,16 +1399,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        return Carry(**{
+        return Carry(
             **{
-                name: tuple(
-                    (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
-                    for _ in range(self.config.depth)
-                )
-                for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
-            },
-            "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
-        })
+                **{
+                    name: tuple(
+                        (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+                        for _ in range(self.config.depth)
+                    )
+                    for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
+                },
+                "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
+            }
+        )
 
     def sample_action(
         self,
