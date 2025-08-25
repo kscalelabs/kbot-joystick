@@ -883,7 +883,6 @@ class Carry(TypedDict):
     actor_mirror: tuple[tuple[Array, Array], ...]
     critic: tuple[tuple[Array, Array], ...]
     critic_mirror: tuple[tuple[Array, Array], ...]
-    filter_params: ksim.ClipAccelerationParams
 
 
 class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
@@ -947,7 +946,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
             "linear push": ksim.LinearPushEvent(
-                linvel=1.0,  # BUG: this is not used in ksim actually
+                linvel=1.0,
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
@@ -966,7 +965,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
             "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))  # TODO confirm noise levels
+                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))
             ),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
@@ -981,7 +980,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),
             ),
             "left_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="left_foot_touch"
@@ -1005,12 +1004,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),
                 min_lag=0.0,
                 max_lag=0.1,
                 bias=math.radians(2),
             ),
-            "projected_gravity": ksim.ProjectedGravityObservation.create(  # TODO confirm this is even needed
+            "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="base_site_quat",
             ),
@@ -1065,9 +1064,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
             "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
-            "joint_vel": JointVelocityPenalty(scale=-0.05),  # TODO
-            "joint_accel": JointAccelerationPenalty(scale=-0.05),  # TODO
-            "ctrl": CtrlPenalty(scale=-0.00001),  # TODO maybe ksim new version?
+            "joint_vel": JointVelocityPenalty(scale=-0.05),
+            "joint_accel": JointAccelerationPenalty(scale=-0.05),
+            "ctrl": CtrlPenalty(scale=-0.00001),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -1278,7 +1277,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
             entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
-            action_std=actor_dist.stddev(),
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1290,7 +1288,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "critic": next_critic_c,
             "actor_mirror": next_actor_c_m,
             "critic_mirror": next_critic_c_m,
-            # TODO filter thing
         }
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
@@ -1321,16 +1318,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        return {
-            **{
-                name: tuple(
-                    (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
-                    for _ in range(self.config.depth)
-                )
-                for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
-            }
-            # "filter_params": ksim.ClipAccelerationParams.initialize_from(jnp.array([v for _, v in JOINT_BIASES])),
+        carry_dict = {
+            name: tuple(
+                (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+                for _ in range(self.config.depth)
+            )
+            for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
         }
+        return carry_dict
 
     def sample_action(
         self,
