@@ -44,6 +44,28 @@ JOINT_BIASES: list[tuple[str, float]] = [
     ("dof_left_ankle_02", math.radians(-30.0)),
 ]
 
+JOINT_LIMITS = {
+    'dof_right_shoulder_pitch_03': (-3.1415929794311523, 1.3962630033493042),
+    'dof_right_shoulder_roll_03': (-1.6580630540847778, 0.34906598925590515),
+    'dof_right_shoulder_yaw_02': (-1.6580630540847778, 1.6580630540847778),
+    'dof_right_elbow_02': (0.0, 2.478368043899536),
+    'dof_right_wrist_00': (-1.7453290224075317, 1.7453290224075317),
+    'dof_left_shoulder_pitch_03': (-1.3962630033493042, 3.1415929794311523),
+    'dof_left_shoulder_roll_03': (-0.34906598925590515, 1.6580630540847778),
+    'dof_left_shoulder_yaw_02': (-1.6580630540847778, 1.6580630540847778),
+    'dof_left_elbow_02': (-2.478368043899536, 0.0),
+    'dof_left_wrist_00': (-1.7453290224075317, 1.7453290224075317),
+    'dof_right_hip_pitch_04': (-2.2165679931640625, 1.0471980571746826),
+    'dof_right_hip_roll_03': (-2.268928050994873, 0.20943999290466309),
+    'dof_right_hip_yaw_03': (-1.570796012878418, 1.570796012878418),
+    'dof_right_knee_04': (-2.7052600383758545, 0.0),
+    'dof_right_ankle_02': (-0.22689299285411835, 1.2566369771957397),
+    'dof_left_hip_pitch_04': (-1.0471980571746826, 2.2165679931640625),
+    'dof_left_hip_roll_03': (-0.20943999290466309, 2.268928050994873),
+    'dof_left_hip_yaw_03': (-1.570796012878418, 1.570796012878418),
+    'dof_left_knee_04': (0.0, 2.7052600383758545),
+    'dof_left_ankle_02': (-1.2566369771957397, 0.22689299285411835),
+}
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
@@ -779,7 +801,7 @@ class Actor(eqx.Module):
         mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
 
         # Clip the target positions to the minimum and maximum ranges.
-        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now
+        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now - its bad 
 
         # Apply low-pass filter
         mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, 0.02, self.cutoff_frequency, lpf_params)  # ctrl_dt is 0.02 # TODO get dt
@@ -1156,6 +1178,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             cutoff_frequency=self.config.cutoff_frequency,
         )
 
+    def normalize_joint_pos(self, joint_pos: Array) -> Array:
+        # Get joint biases and limits for normalization
+        joint_names = [name for name, _ in JOINT_BIASES]
+        joint_biases = jnp.array([bias for _, bias in JOINT_BIASES])
+        joint_min = jnp.array([JOINT_LIMITS[name][0] for name in joint_names])
+        joint_max = jnp.array([JOINT_LIMITS[name][1] for name in joint_names])
+        
+        # Calculate maximum range from bias for each joint
+        range_negative = joint_biases - joint_min
+        range_positive = joint_max - joint_biases
+        max_range = jnp.maximum(range_negative, range_positive)
+
+        # Normalize joint positions relative to bias, scaled by max range
+        return (joint_pos - joint_biases) / max_range
+
     def run_actor(
         self,
         model: Actor,
@@ -1171,8 +1208,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         cmd = commands["unified_command"]
         zero_cmd = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
+
         obs = [
-            joint_pos_n,  # NUM_JOINTS
+            self.normalize_joint_pos(joint_pos_n),  # NUM_JOINTS
             joint_vel_n,  # NUM_JOINTS
             projected_gravity_3,  # 3
             imu_gyro_3,  # 3
@@ -1215,7 +1253,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs_n = jnp.concatenate(
             [
                 # actor obs:
-                qpos_n,
+                self.normalize_joint_pos(qpos_n),
                 qvel_n / 10.0,
                 projected_gravity_3,
                 imu_gyro_3,
