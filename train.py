@@ -21,30 +21,30 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 # These are in the order of the neural network outputs.
 # Joint name, neutral position
-JOINT_BIASES: list[tuple[str, float]] = [
-    ("dof_right_shoulder_pitch_03", 0.0),
-    ("dof_right_shoulder_roll_03", math.radians(-10.0)),
-    ("dof_right_shoulder_yaw_02", 0.0),
-    ("dof_right_elbow_02", math.radians(90.0)),
-    ("dof_right_wrist_00", 0.0),
-    ("dof_left_shoulder_pitch_03", 0.0),
-    ("dof_left_shoulder_roll_03", math.radians(10.0)),
-    ("dof_left_shoulder_yaw_02", 0.0),
-    ("dof_left_elbow_02", math.radians(-90.0)),
-    ("dof_left_wrist_00", 0.0),
-    ("dof_right_hip_pitch_04", math.radians(-20.0)),
-    ("dof_right_hip_roll_03", math.radians(-0.0)),
-    ("dof_right_hip_yaw_03", 0.0),
-    ("dof_right_knee_04", math.radians(-50.0)),
-    ("dof_right_ankle_02", math.radians(30.0)),
-    ("dof_left_hip_pitch_04", math.radians(20.0)),
-    ("dof_left_hip_roll_03", math.radians(0.0)),
-    ("dof_left_hip_yaw_03", 0.0),
-    ("dof_left_knee_04", math.radians(50.0)),
-    ("dof_left_ankle_02", math.radians(-30.0)),
-]
+JOINT_BIASES: dict[str, float] = {
+    "dof_right_shoulder_pitch_03": 0.0,
+    "dof_right_shoulder_roll_03": math.radians(-10.0),
+    "dof_right_shoulder_yaw_02": 0.0,
+    "dof_right_elbow_02": math.radians(90.0),
+    "dof_right_wrist_00": 0.0,
+    "dof_left_shoulder_pitch_03": 0.0,
+    "dof_left_shoulder_roll_03": math.radians(10.0),
+    "dof_left_shoulder_yaw_02": 0.0,
+    "dof_left_elbow_02": math.radians(-90.0),
+    "dof_left_wrist_00": 0.0,
+    "dof_right_hip_pitch_04": math.radians(-20.0),
+    "dof_right_hip_roll_03": math.radians(-0.0),
+    "dof_right_hip_yaw_03": 0.0,
+    "dof_right_knee_04": math.radians(-50.0),
+    "dof_right_ankle_02": math.radians(30.0),
+    "dof_left_hip_pitch_04": math.radians(20.0),
+    "dof_left_hip_roll_03": math.radians(0.0),
+    "dof_left_hip_yaw_03": 0.0,
+    "dof_left_knee_04": math.radians(50.0),
+    "dof_left_ankle_02": math.radians(-30.0),
+}
 
-JOINT_LIMITS = {
+JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_right_shoulder_pitch_03": (-3.1415929794311523, 1.3962630033493042),
     "dof_right_shoulder_roll_03": (-1.6580630540847778, 0.34906598925590515),
     "dof_right_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
@@ -253,7 +253,7 @@ class ArmPositionReward(ksim.Reward):
         # Map joint names to indices
         joint_to_idx = ksim.get_qpos_data_idxs_by_name(physics_model)
         joint_indices = jnp.array([int(joint_to_idx[name][0]) - 7 for name in joint_names])
-        joint_biases = jnp.array([bias for (name, bias) in JOINT_BIASES if name in joint_names])
+        joint_biases = jnp.array([JOINT_BIASES[name] for name in joint_names])
 
         return cls(
             joint_indices=joint_indices,
@@ -802,7 +802,7 @@ class Actor(eqx.Module):
 
         # Apply bias to the means
         arm_cmd_bias = jnp.concatenate([obs_n[..., -10:], jnp.zeros(shape=(10,))], axis=-1)
-        mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
+        mean_n = mean_n + jnp.array(list(JOINT_BIASES.values())) + arm_cmd_bias
 
         # Clip the target positions to the minimum and maximum ranges.
         # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now - its bad
@@ -998,7 +998,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v in JOINT_BIASES}, scale=0.1),
+            ksim.RandomJointPositionReset.create(physics_model, JOINT_BIASES, scale=0.1),
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
@@ -1060,7 +1060,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
-        arm_joint_names = [name for name, _ in JOINT_BIASES[:10]]
+        arm_joint_names = list(JOINT_BIASES.keys())[:10]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return {
@@ -1186,19 +1186,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
 
     def normalize_joint_pos(self, joint_pos: Array) -> Array:
-        # Get joint biases and limits for normalization
-        joint_names = [name for name, _ in JOINT_BIASES]
-        joint_biases = jnp.array([bias for _, bias in JOINT_BIASES])
-        joint_min = jnp.array([JOINT_LIMITS[name][0] for name in joint_names])
-        joint_max = jnp.array([JOINT_LIMITS[name][1] for name in joint_names])
-
-        # Calculate maximum range from bias for each joint
-        range_negative = joint_biases - joint_min
-        range_positive = joint_max - joint_biases
-        max_range = jnp.maximum(range_negative, range_positive)
-
-        # Normalize joint positions relative to bias, scaled by max range
-        return (joint_pos - joint_biases) / max_range
+        joint_biases = jnp.array(list(JOINT_BIASES.values()))
+        joint_min, joint_max = jnp.array(list(JOINT_LIMITS.values())).T
+        max_joint_range = jnp.maximum(joint_biases - joint_min, joint_max - joint_biases)
+        return (joint_pos - joint_biases) / max_joint_range
 
     def normalize_joint_vel(self, joint_vel: Array) -> Array:
         return joint_vel / 10.0
