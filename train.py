@@ -1148,7 +1148,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            + 5 # projected gravity
+            + 5  # projected gravity
             + 3  # imu_gyro
             + num_commands
         )
