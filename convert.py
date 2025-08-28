@@ -1,12 +1,14 @@
 """Converts a checkpoint to a deployable model."""
 
 import argparse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import cast
 
 import jax
 import jax.numpy as jnp
 import ksim
+from jax.flatten_util import ravel_pytree
 from jaxtyping import Array
 from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
@@ -15,17 +17,17 @@ from kinfer.rust_bindings import PyModelMetadata
 from train import HumanoidWalkingTask, Model
 
 
+@jax.tree_util.register_dataclass
+@dataclass(frozen=True)
+class Carry:
+    actor_carry: Array
+    lpf_params: ksim.LowPassFilterParams
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("checkpoint_path", type=str)
     parser.add_argument("output_path", type=str)
-    parser.add_argument(
-        "--num_commands",
-        type=int,
-        required=True,
-        choices=[3, 16],
-        help="Number of commands (3 or 16)",
-    )
     args = parser.parse_args()
 
     if not (ckpt_path := Path(args.checkpoint_path)).exists():
@@ -39,26 +41,33 @@ def main() -> None:
     joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
 
     # Constant values.
-    carry_shape = (task.config.depth, 2, task.config.hidden_size)
-    num_commands = args.num_commands
+    depth = task.config.depth
+    hidden_size = task.config.hidden_size
+    carry_shape = (depth, 2, hidden_size)
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=num_commands,
-        carry_size=carry_shape,
+        num_commands=16,
+        carry_size=(depth * 2 * hidden_size + len(joint_names),),
     )
+
+    init_carry = Carry(
+        actor_carry=jnp.zeros(carry_shape),
+        lpf_params=ksim.LowPassFilterParams.initialize(num_joints=len(joint_names)),
+    )
+    flat, unravel = ravel_pytree(init_carry)
 
     @jax.jit
     def init_fn() -> Array:
-        return jnp.zeros(carry_shape)
+        return flat
 
     @jax.jit
     def step_fn(
         joint_angles: Array,
         joint_angular_velocities: Array,
-        command: Array,
         projected_gravity: Array,
         gyroscope: Array,
+        command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
         # pad command to 16 regardless of num_commands
@@ -68,18 +77,31 @@ def main() -> None:
 
         obs = jnp.concatenate(
             [
-                joint_angles,
-                joint_angular_velocities,
-                projected_gravity,
+                task.normalize_joint_pos(joint_angles),
+                task.normalize_joint_vel(joint_angular_velocities),
+                task.encode_projected_gravity(projected_gravity),
                 gyroscope,
                 cmd_zero,
                 cmd,
             ],
             axis=-1,
         )
-        dist, carry = model.actor.forward(obs, carry)
-        carry_array = jnp.stack([jnp.stack(c) for c in carry])
-        return dist.mode(), carry_array
+
+        # Converts the carry array to the PyTree.
+        carry_pt: Carry = unravel(carry)
+        dist, new_carry, lpf_params = model.actor.forward(
+            obs_n=obs,
+            carry=carry_pt.actor_carry,
+            lpf_params=carry_pt.lpf_params,
+        )
+
+        # Flattens the new carry.
+        new_carry_pt = Carry(
+            actor_carry=new_carry,
+            lpf_params=lpf_params,
+        )
+        new_carry_flat, _ = ravel_pytree(new_carry_pt)
+        return dist.mode(), new_carry_flat
 
     init_onnx = export_fn(
         model=init_fn,
