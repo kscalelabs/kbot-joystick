@@ -927,6 +927,7 @@ class Carry(TypedDict):
     critic: tuple[tuple[Array, Array], ...]
     critic_mirror: tuple[tuple[Array, Array], ...]
     lpf_params: ksim.LowPassFilterParams
+    lpf_params_mirror: ksim.LowPassFilterParams
 
 
 class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
@@ -1298,16 +1299,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[Carry, ksim.PPOVariables]:
         transition, rng = xs
 
-        actor_c = carry["actor"]
-        critic_c = carry["critic"]
-        actor_c_m = carry["actor_mirror"]
-        critic_c_m = carry["critic_mirror"]
-
         actor_dist, next_actor_c, next_lpf_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
-            carry=actor_c,
+            carry=carry["actor"],
             lpf_params=carry["lpf_params"],
         )
 
@@ -1319,16 +1315,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             model=model.critic,
             observations=transition.obs,
             commands=transition.command,
-            carry=critic_c,
+            carry=carry["critic"],
         )
 
         # compute mirror losses
-        mirrored_actor_dist, next_actor_c_m, _ = self.run_actor(
+        mirrored_actor_dist, next_actor_c_m, next_lpf_params_m = self.run_actor(
             model=model.actor,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
-            carry=actor_c_m,
-            lpf_params=carry["lpf_params"],
+            carry=carry["actor_mirror"],
+            lpf_params=carry["lpf_params_mirror"],
         )
         double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
         action_mirror_loss = (
@@ -1339,7 +1335,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             model=model.critic,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
-            carry=critic_c_m,
+            carry=carry["critic_mirror"],
         )
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
@@ -1360,6 +1356,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "actor_mirror": next_actor_c_m,
             "critic_mirror": next_critic_c_m,
             "lpf_params": next_lpf_params,
+            "lpf_params_mirror": next_lpf_params_m,
         }
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
@@ -1400,6 +1397,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
                 },
                 "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
+                "lpf_params_mirror": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
             }
         )
 
