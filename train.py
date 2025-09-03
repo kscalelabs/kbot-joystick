@@ -585,7 +585,6 @@ class UnifiedCommand(ksim.Command):
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h, rng_i = jax.random.split(rng, 9)
 
-        # cmd  = [vx, vy, wz, bh, rx, ry]
         vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
         vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
         wz = jax.random.uniform(rng_d, (1,), minval=self.wz_range[0], maxval=self.wz_range[1])
@@ -593,16 +592,9 @@ class UnifiedCommand(ksim.Command):
         rx = jax.random.uniform(rng_f, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_g, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
-        # 50% chance to sample from wide uniform distribution
-        arms_uni = jax.random.uniform(
-            rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
-        )
-        # 50% chance to mask out 9/10 arm commands and have only 1 active
-        active_idx = jax.random.randint(rng_i, (), minval=0, maxval=10)
-        mask = jnp.arange(10) == active_idx
-        arms_gau = jax.random.normal(rng_i, (10,)) * 0.5 * mask
-        arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
-        arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
+        arms = jax.random.uniform(rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1]))
+        mask = jax.random.bernoulli(rng_h, shape=(10,))
+        arms = arms * mask
 
         _ = jnp.zeros_like(vx)
         __ = jnp.zeros_like(arms)
