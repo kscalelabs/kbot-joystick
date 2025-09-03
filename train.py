@@ -1007,11 +1007,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
+        # bias joint pos: add gaussian 0.05 rad TODOTODOTODO
         return {
             "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
-            "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))  # TODO confirm noise levels
-            ),
+            "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -1025,7 +1024,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),
             ),
             "left_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="left_foot_touch"
@@ -1049,7 +1048,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
                 max_lag=0.1,
                 bias=math.radians(2),
