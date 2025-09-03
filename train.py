@@ -86,7 +86,7 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
         help="The scale for the standard deviations of the actor.",
     )
     cutoff_frequency: float = xax.field(
-        value=4.0,
+        value=10.0,
         help="The cutoff frequency for the low-pass filter.",
     )
     # Optimizer parameters.
