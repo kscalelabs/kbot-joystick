@@ -44,27 +44,51 @@ JOINT_BIASES: dict[str, float] = {
     "dof_left_ankle_02": math.radians(-30.0),
 }
 
+# old kbot
+# JOINT_LIMITS: dict[str, tuple[float, float]] = {
+#     "dof_right_shoulder_pitch_03": (-3.1415929794311523, 1.3962630033493042),
+#     "dof_right_shoulder_roll_03": (-1.6580630540847778, 0.34906598925590515),
+#     "dof_right_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
+#     "dof_right_elbow_02": (0.0, 2.478368043899536),
+#     "dof_right_wrist_00": (-1.7453290224075317, 1.7453290224075317),
+#     "dof_left_shoulder_pitch_03": (-1.3962630033493042, 3.1415929794311523),
+#     "dof_left_shoulder_roll_03": (-0.34906598925590515, 1.6580630540847778),
+#     "dof_left_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
+#     "dof_left_elbow_02": (-2.478368043899536, 0.0),
+#     "dof_left_wrist_00": (-1.7453290224075317, 1.7453290224075317),
+#     "dof_right_hip_pitch_04": (-2.2165679931640625, 1.0471980571746826),
+#     "dof_right_hip_roll_03": (-2.268928050994873, 0.20943999290466309),
+#     "dof_right_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
+#     "dof_right_knee_04": (-2.7052600383758545, 0.0),
+#     "dof_right_ankle_02": (-0.22689299285411835, 1.2566369771957397),
+#     "dof_left_hip_pitch_04": (-1.0471980571746826, 2.2165679931640625),
+#     "dof_left_hip_roll_03": (-0.20943999290466309, 2.268928050994873),
+#     "dof_left_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
+#     "dof_left_knee_04": (0.0, 2.7052600383758545),
+#     "dof_left_ankle_02": (-1.2566369771957397, 0.22689299285411835),
+# }
+
 JOINT_LIMITS: dict[str, tuple[float, float]] = {
-    "dof_right_shoulder_pitch_03": (-3.1415929794311523, 1.3962630033493042),
-    "dof_right_shoulder_roll_03": (-1.6580630540847778, 0.34906598925590515),
-    "dof_right_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
-    "dof_right_elbow_02": (0.0, 2.478368043899536),
-    "dof_right_wrist_00": (-1.7453290224075317, 1.7453290224075317),
-    "dof_left_shoulder_pitch_03": (-1.3962630033493042, 3.1415929794311523),
-    "dof_left_shoulder_roll_03": (-0.34906598925590515, 1.6580630540847778),
-    "dof_left_shoulder_yaw_02": (-1.6580630540847778, 1.6580630540847778),
-    "dof_left_elbow_02": (-2.478368043899536, 0.0),
-    "dof_left_wrist_00": (-1.7453290224075317, 1.7453290224075317),
-    "dof_right_hip_pitch_04": (-2.2165679931640625, 1.0471980571746826),
-    "dof_right_hip_roll_03": (-2.268928050994873, 0.20943999290466309),
-    "dof_right_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
-    "dof_right_knee_04": (-2.7052600383758545, 0.0),
-    "dof_right_ankle_02": (-0.22689299285411835, 1.2566369771957397),
-    "dof_left_hip_pitch_04": (-1.0471980571746826, 2.2165679931640625),
-    "dof_left_hip_roll_03": (-0.20943999290466309, 2.268928050994873),
-    "dof_left_hip_yaw_03": (-1.570796012878418, 1.570796012878418),
-    "dof_left_knee_04": (0.0, 2.7052600383758545),
-    "dof_left_ankle_02": (-1.2566369771957397, 0.22689299285411835),
+    "dof_left_hip_pitch_04": (-1.047198, 2.216568),
+    "dof_left_hip_roll_03": (-0.20944, 2.268928),
+    "dof_left_hip_yaw_03": (-1.570796, 1.570796),
+    "dof_left_knee_04": (0.0, 2.70526),
+    "dof_left_ankle_02": (-1.134464, 0.261799),
+    "dof_right_shoulder_pitch_03": (-3.490658, 1.047198),
+    "dof_right_shoulder_roll_03": (-1.658063, 0.436332),
+    "dof_right_shoulder_yaw_02": (-1.671886, 1.671886),
+    "dof_right_elbow_02": (0.0, 2.478368),
+    "dof_right_wrist_00": (-1.37881, 1.37881),
+    "dof_left_shoulder_pitch_03": (-1.047198, 3.490658),
+    "dof_left_shoulder_roll_03": (-0.436332, 1.658063),
+    "dof_left_shoulder_yaw_02": (-1.671886, 1.671886),
+    "dof_left_elbow_02": (-2.478368, 0.0),
+    "dof_left_wrist_00": (-1.37881, 1.37881),
+    "dof_right_hip_pitch_04": (-2.216568, 1.047198),
+    "dof_right_hip_roll_03": (-2.268928, 0.20944),
+    "dof_right_hip_yaw_03": (-1.570796, 1.570796),
+    "dof_right_knee_04": (-2.70526, 0.0),
+    "dof_right_ankle_02": (-0.261799, 1.134464),
 }
 
 
@@ -592,7 +616,9 @@ class UnifiedCommand(ksim.Command):
         rx = jax.random.uniform(rng_f, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_g, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
-        arms = jax.random.uniform(rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1]))
+        arms = jax.random.uniform(
+            rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
+        )
         mask = jax.random.bernoulli(rng_h, shape=(10,))
         arms = arms * mask
 
