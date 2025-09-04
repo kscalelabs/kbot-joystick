@@ -969,11 +969,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             return optax.chain(optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay))
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot", name="robot"))
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -1061,8 +1061,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "feet_position": FeetPositionObservation.create(
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
             ),
             "base_height": BaseHeightObservation(),
             "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
@@ -1106,8 +1106,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "base_height": TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
                 standard_height=0.99,
@@ -1120,8 +1120,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "feet_airtime": FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             "feet_orient": FeetOrientationReward.create(
                 physics_model=physics_model,
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.1,
                 error_scale=0.02,
             ),
@@ -1138,8 +1138,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "bad_z": TerrainBadZTermination.create(
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
                 unhealthy_z_lower=0.6,
                 unhealthy_z_upper=1.2,
             ),
