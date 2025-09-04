@@ -706,6 +706,31 @@ class PlaneXYPositionReset(ksim.Reset):
         return data
 
 
+@attrs.define(frozen=True, kw_only=True)
+class BiasedJointPositionObservation(ksim.StatefulObservation):
+    """Observes joint positions with an added bias in addition to noise."""
+
+    bias_range: float = attrs.field(default=0.0)
+
+    def initial_carry(self, physics_state: ksim.PhysicsState, rng: PRNGKeyArray) -> Array:
+        num_joints = physics_state.data.qpos[7:].shape[0]  # Skip first 7 DoF (base pose)
+        bias = jax.random.uniform(rng, shape=(num_joints,), minval=-self.bias_range, maxval=self.bias_range)
+        return bias
+
+    def observe_stateful(
+        self,
+        state: ksim.ObservationInput,
+        curriculum_level: Array,
+        rng: PRNGKeyArray,
+    ) -> tuple[Array, Array]:
+        bias: Array = state.obs_carry
+        joint_pos = state.physics_state.data.qpos[7:]  # Skip first 7 DoF (base pose)
+
+        biased_pos = joint_pos + bias
+
+        return biased_pos, bias
+
+
 class Actor(eqx.Module):
     """Actor for the walking task."""
 
@@ -999,11 +1024,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
+        # bias joint pos: add gaussian 0.05 rad TODOTODOTODO
         return {
-            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
-            "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))  # TODO confirm noise levels
+            "joint_position": ksim.JointPositionObservation(),
+            "biased_joint_position": BiasedJointPositionObservation(
+                bias_range=math.radians(0.05), noise=ksim.AdditiveUniformNoise(mag=math.radians(2))
             ),
+            "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -1017,7 +1044,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),
             ),
             "left_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="left_foot_touch"
@@ -1041,7 +1068,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),  # TODO confirm noise level
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
                 max_lag=0.1,
                 bias=math.radians(2),
@@ -1208,7 +1235,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         carry: tuple[tuple[Array, ...], ...],
         lpf_params: ksim.LowPassFilterParams,
     ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
-        joint_pos_n = observations["noisy_joint_position"]
+        # joint_pos_n = observations["noisy_joint_position"]
+        joint_pos_n = observations["noisy_biased_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
@@ -1445,7 +1473,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
-        noisy_joint_pos_m = self.mirror_joints(obs["noisy_joint_position"])
+        noisy_joint_pos_m = self.mirror_joints(obs["noisy_biased_joint_position"])
         noisy_joint_vel_m = self.mirror_joints(obs["noisy_joint_velocity"])
         noisy_imu_gyro_m = jnp.concatenate(
             [
@@ -1572,7 +1600,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         return xax.FrozenDict(
             {
-                "noisy_joint_position": noisy_joint_pos_m,
+                "noisy_biased_joint_position": noisy_joint_pos_m,
                 "noisy_joint_velocity": noisy_joint_vel_m,
                 "noisy_imu_gyro": noisy_imu_gyro_m,
                 "noisy_imu_projected_gravity": noisy_imu_projected_gravity_m,
