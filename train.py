@@ -1010,7 +1010,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
             "linear push": ksim.LinearPushEvent(
-                linvel=1.0,  # BUG: this is not used in ksim actually
+                linvel=1.0,
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
