@@ -1468,24 +1468,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def mirror_joints(self, j: Array) -> Array:
         assert j.shape[0] == 20, "Joints must be 20-dimensional"
-        j_m = jnp.zeros_like(j)
 
-        # Arms (first 10 joints)
-        # Mirror right arm (0-4) to left arm positions (5-9)
-        j_m = j_m.at[0:5].set(j[5:10])
-        # Mirror left arm (5-9) to right arm positions (0-4)
-        j_m = j_m.at[5:10].set(j[0:5])
+        left_leg = j[0:5]
+        right_arm = j[5:10]
+        left_arm = j[10:15]
+        right_leg = j[15:20]
 
-        # Legs (next 10 joints)
-        # Mirror right leg (10-14) to left leg positions (15-19)
-        j_m = j_m.at[10:15].set(j[15:20])
-        # Mirror left leg (15-19) to right leg positions (10-14)
-        j_m = j_m.at[15:20].set(j[10:15])
-
-        # Negate every joint angle
-        j_m = -j_m
-
-        return j_m
+        return -jnp.concatenate([right_leg, left_arm, right_arm, left_leg], axis=-1)
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
@@ -1651,11 +1640,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 self.mirror_joints(
                     jnp.concatenate(
                         [
+                            jnp.zeros(shape=(5,)),
                             cmd_u[..., 6:16],
-                            jnp.zeros(shape=(10,)),
+                            jnp.zeros(shape=(5,)),
                         ]
                     )
-                )[..., :10],  # arms
+                )[..., 5:15],  # arms
             ],
             axis=-1,
         )
