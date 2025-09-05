@@ -69,6 +69,7 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
 
 assert list(JOINT_BIASES.keys()) == list(JOINT_LIMITS.keys())
 
+
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     """Config for the humanoid walking task."""
@@ -426,18 +427,27 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        straight_foot_euler = jnp.stack([
-            jnp.stack([
-                jnp.full_like(base_yaw, -jnp.pi / 2),
-                jnp.zeros_like(base_yaw),
-                base_yaw - jnp.pi,
-            ], axis=-1),
-            jnp.stack([
-                jnp.full_like(base_yaw, jnp.pi / 2),  # Flipped sign for right foot
-                jnp.zeros_like(base_yaw),
-                base_yaw - jnp.pi,
-            ], axis=-1),
-        ], axis=1)
+        straight_foot_euler = jnp.stack(
+            [
+                jnp.stack(
+                    [
+                        jnp.full_like(base_yaw, -jnp.pi / 2),
+                        jnp.zeros_like(base_yaw),
+                        base_yaw - jnp.pi,
+                    ],
+                    axis=-1,
+                ),
+                jnp.stack(
+                    [
+                        jnp.full_like(base_yaw, jnp.pi / 2),  # Flipped sign for right foot
+                        jnp.zeros_like(base_yaw),
+                        base_yaw - jnp.pi,
+                    ],
+                    axis=-1,
+                ),
+            ],
+            axis=1,
+        )
 
         # compute rpy error
         straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
