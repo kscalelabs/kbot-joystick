@@ -1004,7 +1004,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
             # "all_body_COM": ksim.AllBodiesCOMRandomizer(),
-            "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale=0.2),
+            "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale=0.1),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
