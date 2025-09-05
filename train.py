@@ -91,6 +91,7 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_left_ankle_02": (-1.134464, 0.261799),
 }
 
+assert list(JOINT_BIASES.keys()) == list(JOINT_LIMITS.keys())
 
 @dataclass
 class HumanoidWalkingTaskConfig(ksim.PPOConfig):
