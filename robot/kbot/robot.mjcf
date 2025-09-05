@@ -67,6 +67,36 @@
       <body name="KD_B_102B_TORSO_BTM" pos="0 -0.095 0" quat="0.7071054825112363 0.0 0.0 0.7071080798594735">
         <inertial pos="-0.000061 0.000503 0.157978" quat="1.0 0.0 0.0 0.0" mass="13.751127" diaginertia="0.5458 0.574453 0.064293" />
         <geom name="KD_B_102B_TORSO_BTM_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_B_102B_TORSO_BTM.stl" class="visual" />
+        <body name="KD_D_102L_L_Hip_Yoke_Drive" pos="0.056001 0.002025 -0.073841" quat="0.5000001633974483 -0.4999999999999733 -0.49999983660255165 0.4999999999999733">
+          <joint name="dof_left_hip_pitch_04" type="hinge" ref="0.0" class="robstride_04" range="-1.047198 2.216568" axis="0 0 1" />
+          <inertial pos="-0.004258 0.005667 -0.040380" quat="1.0 0.0 0.0 0.0" mass="0.550354" diaginertia="0.00093 0.001251 0.001328" />
+          <geom name="KD_D_102L_L_Hip_Yoke_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_102L_L_Hip_Yoke_Drive.stl" class="visual" />
+          <body name="L_Hip_Roll_RS03" pos="-0.028250 0.030000 -0.071000" quat="-1.2247452309842457e-07 0.7071068967259713 1.22474483074382e-07 0.7071066656470838">
+            <joint name="dof_left_hip_roll_03" type="hinge" ref="0.0" class="robstride_03" range="-0.209440 2.268928" axis="0 0 -1" />
+            <inertial pos="-0.000136 -0.059376 0.026066" quat="1.0 0.0 0.0 0.0" mass="2.396969" diaginertia="0.01035 0.003224 0.010755" />
+            <geom name="L_Hip_Roll_RS03_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="L_Hip_Roll_RS03.stl" class="visual" />
+            <body name="KD_D_301L_L_Femur_Lower_Drive" pos="0 -0.143000 0.025250" quat="-1.2247452309842457e-07 -1.22474483074382e-07 -0.7071066656470838 -0.7071068967259713">
+              <joint name="dof_left_hip_yaw_03" type="hinge" ref="0.0" class="robstride_03" range="-1.570796 1.570796" axis="0 0 1" />
+              <inertial pos="0.001576 0.013392 -0.172799" quat="1.0 0.0 0.0 0.0" mass="2.349254" diaginertia="0.015361 0.013924 0.004011" />
+              <geom name="KD_D_301L_L_Femur_Lower_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_301L_L_Femur_Lower_Drive.stl" class="visual" />
+              <body name="KD_D_401L_L_Shin_Drive" pos="-0.021000 0.021000 -0.212000" quat="0.5000001633974483 0.4999999999999733 0.49999983660255165 0.4999999999999733">
+                <joint name="dof_left_knee_04" type="hinge" ref="0.0" class="robstride_04" range="0 2.705260" axis="0 0 1" />
+                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" />
+                <geom name="KD_D_401L_L_Shin_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_401L_L_Shin_Drive.stl" class="visual" />
+                <body name="LFootBushing_GPF_1517_12" pos="-0.030000 -0.290000 0.000950" quat="-1.7320510330969933e-07 0.999999999999985 0.0 -0.0">
+                  <joint name="dof_left_ankle_02" type="hinge" ref="0.0" class="robstride_02" range="-1.134464 0.261799" axis="0 0 -1" />
+                  <inertial pos="-0.016549 0.031142 -0.012943" quat="1.0 0.0 0.0 0.0" mass="0.608966" diaginertia="0.000377 0.00194 0.001893" />
+                  <geom name="LFootBushing_GPF_1517_12_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="LFootBushing_GPF_1517_12.stl" class="visual" />
+                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104686" material="collision_material" class="collision" />
+                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104686" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113013 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104686" material="collision_material" class="collision" />
+                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113013 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104686" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <site name="left_foot" size="0.105 0.02 0.036" pos="-0.0283 0.038 -0.014" type="box" />
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
         <body name="KC_C_101R_ShldYokeDrive" pos="-0.120999 0.002025 0.336659" quat="0.7071068967259818 0.0 -0.7071066656470943 0.0">
           <joint name="dof_right_shoulder_pitch_03" type="hinge" ref="0.0" class="robstride_03" range="-3.490658 1.047198" axis="0 0 -1" />
           <inertial pos="0.003158 -0.007737 0.047375" quat="1.0 0.0 0.0 0.0" mass="0.569870" diaginertia="0.001409 0.001159 0.001309" />
@@ -147,36 +177,6 @@
             </body>
           </body>
         </body>
-        <body name="KD_D_102L_L_Hip_Yoke_Drive" pos="0.056001 0.002025 -0.073841" quat="0.5000001633974483 -0.4999999999999733 -0.49999983660255165 0.4999999999999733">
-          <joint name="dof_left_hip_pitch_04" type="hinge" ref="0.0" class="robstride_04" range="-1.047198 2.216568" axis="0 0 1" />
-          <inertial pos="-0.004258 0.005667 -0.040380" quat="1.0 0.0 0.0 0.0" mass="0.550354" diaginertia="0.00093 0.001251 0.001328" />
-          <geom name="KD_D_102L_L_Hip_Yoke_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_102L_L_Hip_Yoke_Drive.stl" class="visual" />
-          <body name="L_Hip_Roll_RS03" pos="-0.028250 0.030000 -0.071000" quat="-1.2247452309842457e-07 0.7071068967259713 1.22474483074382e-07 0.7071066656470838">
-            <joint name="dof_left_hip_roll_03" type="hinge" ref="0.0" class="robstride_03" range="-0.209440 2.268928" axis="0 0 -1" />
-            <inertial pos="-0.000136 -0.059376 0.026066" quat="1.0 0.0 0.0 0.0" mass="2.396969" diaginertia="0.01035 0.003224 0.010755" />
-            <geom name="L_Hip_Roll_RS03_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="L_Hip_Roll_RS03.stl" class="visual" />
-            <body name="KD_D_301L_L_Femur_Lower_Drive" pos="0 -0.143000 0.025250" quat="-1.2247452309842457e-07 -1.22474483074382e-07 -0.7071066656470838 -0.7071068967259713">
-              <joint name="dof_left_hip_yaw_03" type="hinge" ref="0.0" class="robstride_03" range="-1.570796 1.570796" axis="0 0 1" />
-              <inertial pos="0.001576 0.013392 -0.172799" quat="1.0 0.0 0.0 0.0" mass="2.349254" diaginertia="0.015361 0.013924 0.004011" />
-              <geom name="KD_D_301L_L_Femur_Lower_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_301L_L_Femur_Lower_Drive.stl" class="visual" />
-              <body name="KD_D_401L_L_Shin_Drive" pos="-0.021000 0.021000 -0.212000" quat="0.5000001633974483 0.4999999999999733 0.49999983660255165 0.4999999999999733">
-                <joint name="dof_left_knee_04" type="hinge" ref="0.0" class="robstride_04" range="0 2.705260" axis="0 0 1" />
-                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" />
-                <geom name="KD_D_401L_L_Shin_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_401L_L_Shin_Drive.stl" class="visual" />
-                <body name="LFootBushing_GPF_1517_12" pos="-0.030000 -0.290000 0.000950" quat="-1.7320510330969933e-07 0.999999999999985 0.0 -0.0">
-                  <joint name="dof_left_ankle_02" type="hinge" ref="0.0" class="robstride_02" range="-1.134464 0.261799" axis="0 0 -1" />
-                  <inertial pos="-0.016549 0.031142 -0.012943" quat="1.0 0.0 0.0 0.0" mass="0.608966" diaginertia="0.000377 0.00194 0.001893" />
-                  <geom name="LFootBushing_GPF_1517_12_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="LFootBushing_GPF_1517_12.stl" class="visual" />
-                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104686" material="collision_material" class="collision" />
-                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104686" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113013 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104686" material="collision_material" class="collision" />
-                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113013 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104686" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <site name="left_foot" size="0.105 0.02 0.036" pos="-0.0283 0.038 -0.014" type="box" />
-                </body>
-              </body>
-            </body>
-          </body>
-        </body>
         <body name="imu" pos="-0.013761 -0.022944 0.394547" quat="0.9999845682495649 0.005555471422940753 0.0 0.0">
           <inertial pos="0.014706 0.012343 0.002999" quat="1.0 0.0 0.0 0.0" mass="0.005700" diaginertia="1e-06 1e-06 2e-06" />
           <geom name="imu_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="imu.stl" class="visual" />
@@ -190,6 +190,11 @@
   </worldbody>
 
   <actuator>
+    <motor name="dof_left_hip_pitch_04_ctrl" joint="dof_left_hip_pitch_04" class="robstride_04" />
+    <motor name="dof_left_hip_roll_03_ctrl" joint="dof_left_hip_roll_03" class="robstride_03" />
+    <motor name="dof_left_hip_yaw_03_ctrl" joint="dof_left_hip_yaw_03" class="robstride_03" />
+    <motor name="dof_left_knee_04_ctrl" joint="dof_left_knee_04" class="robstride_04" />
+    <motor name="dof_left_ankle_02_ctrl" joint="dof_left_ankle_02" class="robstride_02" />
     <motor name="dof_right_shoulder_pitch_03_ctrl" joint="dof_right_shoulder_pitch_03" class="robstride_03" />
     <motor name="dof_right_shoulder_roll_03_ctrl" joint="dof_right_shoulder_roll_03" class="robstride_03" />
     <motor name="dof_right_shoulder_yaw_02_ctrl" joint="dof_right_shoulder_yaw_02" class="robstride_02" />
@@ -205,11 +210,6 @@
     <motor name="dof_right_hip_yaw_03_ctrl" joint="dof_right_hip_yaw_03" class="robstride_03" />
     <motor name="dof_right_knee_04_ctrl" joint="dof_right_knee_04" class="robstride_04" />
     <motor name="dof_right_ankle_02_ctrl" joint="dof_right_ankle_02" class="robstride_02" />
-    <motor name="dof_left_hip_pitch_04_ctrl" joint="dof_left_hip_pitch_04" class="robstride_04" />
-    <motor name="dof_left_hip_roll_03_ctrl" joint="dof_left_hip_roll_03" class="robstride_03" />
-    <motor name="dof_left_hip_yaw_03_ctrl" joint="dof_left_hip_yaw_03" class="robstride_03" />
-    <motor name="dof_left_knee_04_ctrl" joint="dof_left_knee_04" class="robstride_04" />
-    <motor name="dof_left_ankle_02_ctrl" joint="dof_left_ankle_02" class="robstride_02" />
   </actuator>
 
   <contact />
