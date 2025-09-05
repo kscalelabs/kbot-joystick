@@ -1004,7 +1004,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
             # "all_body_COM": ksim.AllBodiesCOMRandomizer(),
-            "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "base", scale=0.2),
+            "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale=0.2),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
@@ -1014,10 +1014,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
-            "angular push": ksim.AngularPushEvent(
-                angvel=0.8,
-                interval_range=(3.0, 6.0),
-            ),
+            # "angular push": ksim.AngularPushEvent(
+            #     angvel=0.8,
+            #     interval_range=(3.0, 6.0),
+            # ),
         }
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
