@@ -450,27 +450,30 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        straight_foot_euler = jnp.stack(
-            [
+        straight_foot_euler = jnp.stack([
+            jnp.stack([
                 jnp.full_like(base_yaw, -jnp.pi / 2),
                 jnp.zeros_like(base_yaw),
                 base_yaw - jnp.pi,
-            ],
-            axis=-1,
-        )
+            ], axis=-1),
+            jnp.stack([
+                jnp.full_like(base_yaw, jnp.pi / 2),  # Flipped sign for right foot
+                jnp.zeros_like(base_yaw),
+                base_yaw - jnp.pi,
+            ], axis=-1),
+        ], axis=1)
 
         # compute rpy error
         straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
-        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_left_idx, :], axis=-1) ** 2
-        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_right_idx, :], axis=-1) ** 2
-        rpy_error = left_quat_error + right_quat_error
+        feet_quat = trajectory.xquat[:, [self.foot_left_idx, self.foot_right_idx], :]
+        rpy_error = jnp.sum((1 - jnp.sum(straight_foot_quat * feet_quat, axis=-1) ** 2), axis=-1)
 
         # compute rp error
         feet_euler = xax.quat_to_euler(trajectory.xquat[:, [self.foot_left_idx, self.foot_right_idx], :])
         feet_quat = xax.euler_to_quat(feet_euler.at[:, :, 2].set(0.0))
 
-        straight_foot_quat = xax.euler_to_quat(straight_foot_euler.at[:, 2].set(0.0))
-        rp_error = (1 - jnp.sum(straight_foot_quat[:, None, :] * feet_quat, axis=-1) ** 2).sum(axis=1)
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler.at[:, :, 2].set(0.0))
+        rp_error = (1 - jnp.sum(straight_foot_quat * feet_quat, axis=-1) ** 2).sum(axis=1)
 
         # choose rp error or rpy error based on command
         is_rotating = jnp.linalg.norm(trajectory.command["unified_command"][:, 2], axis=-1) > 1e-3
@@ -1137,7 +1140,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.99,
+                standard_height=0.78,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
@@ -1167,8 +1170,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.6,
-                unhealthy_z_upper=1.2,
+                unhealthy_z_lower=0.4,
+                unhealthy_z_upper=1.0,
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
