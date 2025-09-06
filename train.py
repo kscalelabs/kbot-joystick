@@ -1096,7 +1096,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
-        arm_joint_names = list(JOINT_BIASES.keys())[:10]
+        arm_joint_names = list(JOINT_BIASES.keys())[5:15]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return {
