@@ -1014,10 +1014,15 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vel_range=(0.3, 0.8),
                 interval_range=(3.0, 6.0),
             ),
-            # "angular push": ksim.AngularPushEvent(
-            #     angvel=0.8,
+            # "force push": ksim.ForcePushEvent(
+            #     max_force=100.0,
+            #     duration_range=(0.1, 0.5),
             #     interval_range=(3.0, 6.0),
             # ),
+            "angular push": ksim.AngularPushEvent(
+                angvel=0.8,
+                interval_range=(3.0, 6.0),
+            ),
         }
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
