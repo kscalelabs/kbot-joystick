@@ -1667,10 +1667,10 @@ if __name__ == "__main__":
             gamma=0.9,
             lam=0.94,
             actor_mirror_loss_scale=1.0,
-            critic_mirror_loss_scale=0.01,
+            critic_mirror_loss_scale=0.0,
             hidden_size=256,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.004,
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
