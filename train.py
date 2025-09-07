@@ -1089,9 +1089,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_lag=0.1,
                 bias=math.radians(2),
             ),
-            "projected_gravity": ksim.ProjectedGravityObservation.create(  # TODO confirm this is even needed
+            "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
-                framequat_name="base_site_quat",
+                framequat_name="imu_site_quat",
             ),
         }
 
@@ -1105,8 +1105,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
                 bh_range=(-0.25, 0.05),  # m
-                rx_range=(-0.3, 0.3),  # rad
-                ry_range=(-0.3, 0.3),  # rad
+                rx_range=(-0.25, 0.25),  # rad
+                ry_range=(-0.25, 0.25),  # rad
                 arms_range=arm_joint_limits,  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
