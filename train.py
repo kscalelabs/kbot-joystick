@@ -1019,13 +1019,24 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
+            # "all_body_COM": ksim.AllBodiesCOMRandomizer(),
+            "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale=0.1),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
             "linear push": ksim.LinearPushEvent(
-                linvel=1.0,  # BUG: this is not used in ksim actually
+                linvel=1.0,
                 vel_range=(0.3, 0.8),
+                interval_range=(3.0, 6.0),
+            ),
+            # "force push": ksim.ForcePushEvent(
+            #     max_force=100.0,
+            #     duration_range=(0.1, 0.5),
+            #     interval_range=(3.0, 6.0),
+            # ),
+            "angular push": ksim.AngularPushEvent(
+                angvel=0.8,
                 interval_range=(3.0, 6.0),
             ),
         }
@@ -1662,7 +1673,7 @@ if __name__ == "__main__":
             # epochs_per_log_step=1,
             rollout_length_seconds=2.0,
             # global_grad_clip=2.0,
-            entropy_coef=0.002,
+            entropy_coef=0.004,
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
