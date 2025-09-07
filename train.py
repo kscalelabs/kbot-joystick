@@ -1144,9 +1144,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
             "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
-            "joint_vel": JointVelocityPenalty(scale=-0.05),  # TODO
-            "joint_accel": JointAccelerationPenalty(scale=-0.05),  # TODO
-            "ctrl": CtrlPenalty(scale=-0.00001),  # TODO maybe ksim new version?
+            # "joint_vel": JointVelocityPenalty(scale=-0.05),  # TODO
+            # "joint_accel": JointAccelerationPenalty(scale=-0.05),  # TODO
+            # "ctrl": CtrlPenalty(scale=-0.00001),  # TODO maybe ksim new version?
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
