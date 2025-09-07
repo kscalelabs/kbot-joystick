@@ -1123,7 +1123,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # cmd
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
-            "roll_pitch": XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
+            "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
             "base_height": TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
