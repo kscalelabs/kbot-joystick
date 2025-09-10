@@ -27,6 +27,11 @@ JOINT_BIASES: dict[str, float] = {
     "dof_left_hip_yaw_03": 0.0,
     "dof_left_knee_04": math.radians(50.0),
     "dof_left_ankle_02": math.radians(-30.0),
+    "dof_right_hip_pitch_04": math.radians(-20.0),
+    "dof_right_hip_roll_03": math.radians(-0.0),
+    "dof_right_hip_yaw_03": 0.0,
+    "dof_right_knee_04": math.radians(-50.0),
+    "dof_right_ankle_02": math.radians(30.0),
     "dof_right_shoulder_pitch_03": 0.0,
     "dof_right_shoulder_roll_03": math.radians(-10.0),
     "dof_right_shoulder_yaw_02": 0.0,
@@ -37,11 +42,6 @@ JOINT_BIASES: dict[str, float] = {
     "dof_left_shoulder_yaw_02": 0.0,
     "dof_left_elbow_02": math.radians(-90.0),
     "dof_left_wrist_00": 0.0,
-    "dof_right_hip_pitch_04": math.radians(-20.0),
-    "dof_right_hip_roll_03": math.radians(-0.0),
-    "dof_right_hip_yaw_03": 0.0,
-    "dof_right_knee_04": math.radians(-50.0),
-    "dof_right_ankle_02": math.radians(30.0),
 }
 
 JOINT_LIMITS: dict[str, tuple[float, float]] = {
@@ -50,6 +50,11 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_left_hip_yaw_03": (-1.570796, 1.570796),
     "dof_left_knee_04": (0.0, 2.70526),
     "dof_left_ankle_02": (-1.134464, 0.261799),
+    "dof_right_hip_pitch_04": (-2.216568, 1.047198),
+    "dof_right_hip_roll_03": (-2.268928, 0.20944),
+    "dof_right_hip_yaw_03": (-1.570796, 1.570796),
+    "dof_right_knee_04": (-2.70526, 0.0),
+    "dof_right_ankle_02": (-0.261799, 1.134464),
     "dof_right_shoulder_pitch_03": (-3.490658, 1.047198),
     "dof_right_shoulder_roll_03": (-1.658063, 0.436332),
     "dof_right_shoulder_yaw_02": (-1.671886, 1.671886),
@@ -60,11 +65,6 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_left_shoulder_yaw_02": (-1.671886, 1.671886),
     "dof_left_elbow_02": (-2.478368, 0.0),
     "dof_left_wrist_00": (-1.37881, 1.37881),
-    "dof_right_hip_pitch_04": (-2.216568, 1.047198),
-    "dof_right_hip_roll_03": (-2.268928, 0.20944),
-    "dof_right_hip_yaw_03": (-1.570796, 1.570796),
-    "dof_right_knee_04": (-2.70526, 0.0),
-    "dof_right_ankle_02": (-0.261799, 1.134464),
 }
 
 assert list(JOINT_BIASES.keys()) == list(JOINT_LIMITS.keys())
@@ -834,7 +834,7 @@ class Actor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means
-        arm_cmd_bias = jnp.concatenate([jnp.zeros(shape=(5,)), obs_n[..., -10:], jnp.zeros(shape=(5,))], axis=-1)
+        arm_cmd_bias = jnp.concatenate([jnp.zeros(shape=(10,)), obs_n[..., -10:]], axis=-1)
         mean_n = mean_n + jnp.array(list(JOINT_BIASES.values())) + arm_cmd_bias
 
         # Clip the target positions to the minimum and maximum ranges.
@@ -985,11 +985,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             return optax.chain(optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay))
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot-headless", name="robot"))
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot-headless"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -1013,7 +1013,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "armature": ksim.ArmatureRandomizer(),
             "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
-            "joint_zero_position": ksim.JointZeroPositionRandomizer(
+            "joint_zero_position": ksim.JointZeroPositionRandomizer( # bad name -- initial position not zero position.
                 scale_lower=math.radians(-3), scale_upper=math.radians(3)
             ),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
@@ -1101,7 +1101,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
-        arm_joint_names = list(JOINT_BIASES.keys())[5:15]
+        arm_joint_names = list(JOINT_BIASES.keys())[10:20]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return {
@@ -1124,14 +1124,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(
+            "base_height": TerrainBaseHeightReward.create( # TODO fix base origin location. should be at base pitch axis.
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.78,
+                standard_height=0.73,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
@@ -1161,8 +1161,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.4,
-                unhealthy_z_upper=1.0,
+                unhealthy_z_lower=0.35, # for base origin
+                unhealthy_z_upper=0.95,
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
@@ -1475,11 +1475,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         assert j.shape[0] == 20, "Joints must be 20-dimensional"
 
         left_leg = j[0:5]
-        right_arm = j[5:10]
-        left_arm = j[10:15]
-        right_leg = j[15:20]
+        right_leg = j[5:10]
+        right_arm = j[10:15]
+        left_arm = j[15:20]
 
-        return -jnp.concatenate([right_leg, left_arm, right_arm, left_leg], axis=-1)
+        return -jnp.concatenate([right_leg, left_leg, right_arm, left_arm], axis=-1)
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
@@ -1645,12 +1645,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 self.mirror_joints(
                     jnp.concatenate(
                         [
-                            jnp.zeros(shape=(5,)),
+                            jnp.zeros(shape=(10,)),
                             cmd_u[..., 6:16],
-                            jnp.zeros(shape=(5,)),
                         ]
                     )
-                )[..., 5:15],  # arms
+                )[..., 10:20],  # arms
             ],
             axis=-1,
         )
