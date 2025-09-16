@@ -1011,7 +1011,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "static_friction": ksim.StaticFrictionRandomizer(),
             "armature": ksim.ArmatureRandomizer(),
-            "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
+            # "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
             "joint_zero_position": ksim.JointZeroPositionRandomizer(
                 scale_lower=math.radians(-3), scale_upper=math.radians(3)
@@ -1020,7 +1020,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
             "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
-            # "base_COM": ksim.COMRandomizer.from_body_name(physics_model, "Torso_Side_Right", scale=0.1),
+            "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.25),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
@@ -1679,7 +1679,7 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             # sim2real parameters.
-            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
+            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency. # TODO start looking into this, rerun data suggests dt is all over the place.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
