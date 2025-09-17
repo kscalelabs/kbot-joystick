@@ -468,6 +468,20 @@ class FeetOrientationReward(ksim.Reward):
 
 
 @attrs.define(frozen=True, kw_only=True)
+class COMDistanceReward(ksim.Reward):
+    """Keep robot COM close to support polygon centroid, ONLY when standing with 2 feet on the ground."""
+
+    error_scale: float = attrs.field(default=0.25)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        is_valid_support = trajectory.obs["com_distance"] >= 0.0
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        reward_enabled = is_valid_support & is_zero_cmd
+        com_distance = jnp.where(reward_enabled, trajectory.obs["com_distance"], 0.0)
+        return jnp.exp(-com_distance / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
 class BaseAccelerationReward(ksim.Reward):
     """Reward for minimizing base acceleration calculated from qvel."""
 
@@ -532,6 +546,79 @@ class CtrlPenalty(ksim.Reward):
             scale=scale,
             scale_by_curriculum=scale_by_curriculum,
         )
+
+
+@attrs.define(frozen=True)
+class COMDistanceObservation(ksim.Observation):
+    """Observation of the COM support."""
+
+    @staticmethod
+    def polygon_centroid(poly: Array) -> Array:
+        # poly: Nx2 array in CCW or CW order (will work either way)
+        x = poly[:, 0]
+        y = poly[:, 1]
+        x1 = jnp.roll(x, -1)
+        y1 = jnp.roll(y, -1)
+        cross = x * y1 - x1 * y
+        area = 0.5 * jnp.sum(cross)
+
+        # Handle degenerate case using jnp.where
+        mean_point = jnp.mean(poly, axis=0)
+        cx = jnp.where(jnp.abs(area) < 1e-12, mean_point[0], jnp.sum((x + x1) * cross) / (6.0 * area))
+        cy = jnp.where(jnp.abs(area) < 1e-12, mean_point[1], jnp.sum((y + y1) * cross) / (6.0 * area))
+        return jnp.array([cx, cy])
+
+    @staticmethod
+    def monotone_chain_hull(points: Array) -> Array:
+        # Early return for degenerate cases
+        n = points.shape[0]
+        if n <= 1:
+            return points
+
+        # Sort points lexicographically using JAX
+        pts = points[jnp.lexsort((points[:, 1], points[:, 0]))]
+
+        def cross(o: Array, a: Array, b: Array) -> Array:
+            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+
+        # Scan function to build hull
+        def scan_hull(carry: Array, x: Array) -> tuple[Array, None]:
+            hull = carry
+            # Remove points while cross product is non-positive
+            hull = jax.lax.cond(
+                hull.shape[0] >= 2,
+                lambda h: jax.lax.while_loop(
+                    lambda h: h.shape[0] >= 2 and cross(h[-2], h[-1], x) <= 0, lambda h: h[:-1], hull
+                ),
+                lambda h: hull,
+                hull,
+            )
+            # Add new point
+            return jnp.vstack([hull, x]) if hull.shape[0] > 0 else x[None], None
+
+        # Build lower and upper hulls
+        lower, _ = jax.lax.scan(scan_hull, pts[0:1], pts[1:])
+        upper, _ = jax.lax.scan(scan_hull, pts[-1:], jnp.flipud(pts[:-1]))
+
+        # Combine hulls
+        return jnp.concatenate([lower[:-1], upper[:-1]])
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        contact = state.physics_state.data.contact
+        feet_to_floor_contacts = contact.pos[contact.geom1 == 0]
+        base_subtree_com = state.physics_state.data.subtree_com[2]
+
+        # at least 3 capsules in contact, so at least 2 feet and 3 points for the hull
+        is_valid_support = jnp.unique(contact.geom2).size >= 3
+
+        if not is_valid_support:
+            return -1
+
+        hull = self.monotone_chain_hull(feet_to_floor_contacts[:, :2])
+        centroid = self.polygon_centroid(hull)
+
+        distance = jnp.linalg.norm(centroid - base_subtree_com[:2])
+        return distance
 
 
 @attrs.define(frozen=True)
@@ -1098,6 +1185,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
             ),
+            "com_distance": COMDistanceObservation(),
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
@@ -1124,7 +1212,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create( # TODO fix base origin location. should be at base pitch axis.
+            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location. should be at base pitch axis.
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
@@ -1146,6 +1234,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.1,
                 error_scale=0.02,
             ),
+            "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
             "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
@@ -1161,7 +1250,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.35, # for base origin
+                unhealthy_z_lower=0.35,  # for base origin
                 unhealthy_z_upper=0.95,
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
@@ -1679,7 +1768,10 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             # sim2real parameters.
-            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency. # TODO start looking into this, rerun data suggests dt is all over the place.
+            action_latency_range=(
+                0.003,
+                0.01,
+            ),  # Simulate 3-10ms of latency. # TODO start looking into this, rerun data suggests dt is all over the place.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
