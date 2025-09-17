@@ -553,72 +553,151 @@ class COMDistanceObservation(ksim.Observation):
     """Observation of the COM support."""
 
     @staticmethod
-    def polygon_centroid(poly: Array) -> Array:
-        # poly: Nx2 array in CCW or CW order (will work either way)
-        x = poly[:, 0]
-        y = poly[:, 1]
-        x1 = jnp.roll(x, -1)
-        y1 = jnp.roll(y, -1)
-        cross = x * y1 - x1 * y
+    def polygon_centroid_masked(poly: Array, mask: Array) -> Array:
+        # poly: Lx2 padded array, mask: L bool for valid vertices (not necessarily contiguous)
+        L = poly.shape[0]
+        idxs = jnp.arange(L, dtype=jnp.int32)
+        mask_i32 = mask.astype(jnp.int32)
+        count = jnp.sum(mask_i32)
+
+        # Pack valid vertices to the front using nonzero-gather with static size
+        valid_indices = jnp.nonzero(mask, size=L)[0]
+        packed = poly[valid_indices]
+
+        # Work on packed vertices; first `count` entries are valid
+        next_idxs = jnp.where(idxs + 1 < count, idxs + 1, jnp.int32(0))
+        next_pts = packed[next_idxs]
+
+        # Edge mask: enable first (count-1) edges, plus the closing edge if count>0
+        edge_mask = (idxs < jnp.maximum(count - 1, 0)) | ((idxs == jnp.maximum(count - 1, 0)) & (count > 0))
+        edge_mask_f = edge_mask.astype(packed.dtype)
+
+        x = packed[:, 0]
+        y = packed[:, 1]
+        x1 = next_pts[:, 0]
+        y1 = next_pts[:, 1]
+
+        cross = (x * y1 - x1 * y) * edge_mask_f
         area = 0.5 * jnp.sum(cross)
 
-        # Handle degenerate case using jnp.where
-        mean_point = jnp.mean(poly, axis=0)
+        # Fallback mean of valid points if area ~ 0 or no valid points
+        first_mask = idxs < jnp.maximum(count, 0)
+        first_mask_f = first_mask.astype(packed.dtype)
+        count_f = jnp.maximum(first_mask_f.sum(), jnp.array(1.0, dtype=packed.dtype))
+        mean_point = jnp.sum(packed * first_mask_f[:, None], axis=0) / count_f
+
         cx = jnp.where(jnp.abs(area) < 1e-12, mean_point[0], jnp.sum((x + x1) * cross) / (6.0 * area))
         cy = jnp.where(jnp.abs(area) < 1e-12, mean_point[1], jnp.sum((y + y1) * cross) / (6.0 * area))
         return jnp.array([cx, cy])
 
     @staticmethod
-    def monotone_chain_hull(points: Array) -> Array:
-        # Early return for degenerate cases
-        n = points.shape[0]
-        if n <= 1:
-            return points
+    def monotone_chain_hull(points: Array) -> tuple[Array, Array, Array]:
+        """
+        points: (N,2) float array
+        returns: hull_idx: (M,) int array of indices into points (M <= N),
+                hull_pts: (M,2) points[hull_idx]
+        """
+        pts = jnp.asarray(points)
+        n = pts.shape[0]
+        if n == 0:
+            return jnp.array([], dtype=jnp.int32), jnp.empty((0, 2), pts.dtype)
+        if n <= 2:
+            idxs = jnp.arange(n, dtype=jnp.int32)
+            return idxs, pts
 
-        # Sort points lexicographically using JAX
-        pts = points[jnp.lexsort((points[:, 1], points[:, 0]))]
+        # lexicographic sort by x then y
+        order = jnp.lexsort((pts[:,1], pts[:,0])).astype(jnp.int32)
+        spts = pts[order]
 
-        def cross(o: Array, a: Array, b: Array) -> Array:
-            return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
+        def cross(a, b, c):
+            return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
 
-        # Scan function to build hull
-        def scan_hull(carry: Array, x: Array) -> tuple[Array, None]:
-            hull = carry
-            # Remove points while cross product is non-positive
-            hull = jax.lax.cond(
-                hull.shape[0] >= 2,
-                lambda h: jax.lax.while_loop(
-                    lambda h: h.shape[0] >= 2 and cross(h[-2], h[-1], x) <= 0, lambda h: h[:-1], hull
-                ),
-                lambda h: hull,
-                hull,
-            )
-            # Add new point
-            return jnp.vstack([hull, x]) if hull.shape[0] > 0 else x[None], None
+        def build(indices):
+            N = indices.shape[0]
+            stack = -jnp.ones((N,), dtype=jnp.int32)
+            ptr0 = jnp.int32(0)
 
-        # Build lower and upper hulls
-        lower, _ = jax.lax.scan(scan_hull, pts[0:1], pts[1:])
-        upper, _ = jax.lax.scan(scan_hull, pts[-1:], jnp.flipud(pts[:-1]))
+            def push(carry, idx):
+                stack, ptr = carry
 
-        # Combine hulls
-        return jnp.concatenate([lower[:-1], upper[:-1]])
+                def cond_fn(carry_inner):
+                    stack_i, ptr_i = carry_inner
+                    # need ptr_i >= 2 and cross <= 0
+                    a_idx = stack_i[ptr_i - 2]
+                    b_idx = stack_i[ptr_i - 1]
+                    # compute cross on sorted points
+                    return (ptr_i >= 2) & (cross(spts[a_idx], spts[b_idx], spts[idx]) <= 0)
+
+                def body_fn(carry_inner):
+                    stack_i, ptr_i = carry_inner
+                    # pop last
+                    stack_i = stack_i.at[ptr_i - 1].set(-1)
+                    ptr_i = ptr_i - 1
+                    return stack_i, ptr_i
+
+                stack, ptr = jax.lax.while_loop(cond_fn, body_fn, (stack, ptr))
+                stack = stack.at[ptr].set(idx)
+                ptr = ptr + 1
+                return (stack, ptr), None
+
+            (stack_final, ptr_final), _ = jax.lax.scan(push, (stack, ptr0), indices)
+            return stack_final, ptr_final
+
+        sorted_idxs = jnp.arange(spts.shape[0], dtype=jnp.int32)
+
+        # build lower hull on sorted order
+        stack_l, ptr_l = build(sorted_idxs)
+        # build upper hull on reversed order
+        rev_idxs = sorted_idxs[::-1]
+        stack_u, ptr_u = build(rev_idxs)
+
+        # Create fixed-size masks (drop last element of each chain per Andrew's algorithm)
+        n_sorted = spts.shape[0]
+        idxs = jnp.arange(n_sorted, dtype=jnp.int32)
+        lower_len = jnp.maximum(ptr_l - 1, jnp.int32(0))
+        upper_len = jnp.maximum(ptr_u - 1, jnp.int32(0))
+        lower_mask = idxs < lower_len
+        upper_mask = idxs < upper_len
+
+        lower_padded = jnp.where(lower_mask, stack_l, -1)
+        upper_padded = jnp.where(upper_mask, stack_u, -1)
+
+        hull_sorted_positions = jnp.concatenate([lower_padded, upper_padded], axis=0)
+        hull_mask = jnp.concatenate([lower_mask, upper_mask], axis=0)
+
+        # safe gather from order using masked positions
+        safe_positions = jnp.where(hull_mask, hull_sorted_positions, jnp.int32(0))
+        hull_idx = order[safe_positions]
+        hull_pts = pts[hull_idx]
+        return hull_idx, hull_pts, hull_mask
 
     def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         contact = state.physics_state.data.contact
-        feet_to_floor_contacts = contact.pos[contact.geom1 == 0]
+        floor_contact_mask = contact.geom1 == 0
+        feet_to_floor_contacts = jnp.where(floor_contact_mask[:, None], contact.pos, jnp.zeros_like(contact.pos))
         base_subtree_com = state.physics_state.data.subtree_com[2]
 
-        # at least 3 capsules in contact, so at least 2 feet and 3 points for the hull
-        is_valid_support = jnp.unique(contact.geom2).size >= 3
+        # Count unique contacts using a vectorized approach
+        def num_unique(x: Array) -> Array:
+            x = jnp.ravel(contact.geom2)
+            sx = jnp.sort(x)
+            diffs = sx[1:] != sx[:-1]          # booleans where value changes
+            unique_contacts = jnp.where(x.size == 0, 0, jnp.sum(diffs) + 1)
+            return unique_contacts
 
-        if not is_valid_support:
-            return -1
+        def compute_distance(feet_contacts: Array, base_com: Array) -> Array:
+            _, hull_pts, hull_mask = self.monotone_chain_hull(feet_contacts[:, :2])
+            centroid = self.polygon_centroid_masked(hull_pts, hull_mask)
+            return jnp.linalg.norm(centroid - base_com[:2])
 
-        hull = self.monotone_chain_hull(feet_to_floor_contacts[:, :2])
-        centroid = self.polygon_centroid(hull)
-
-        distance = jnp.linalg.norm(centroid - base_subtree_com[:2])
-        return distance
+        unique_contacts = num_unique(contact.geom2)
+        
+        # Only compute hull and distance if we have enough contacts
+        return jax.lax.cond(
+            unique_contacts >= 3,
+            lambda: compute_distance(feet_to_floor_contacts, base_subtree_com),
+            lambda: -1.0
+        )
 
 
 @attrs.define(frozen=True)
