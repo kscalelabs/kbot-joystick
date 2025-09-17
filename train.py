@@ -474,11 +474,18 @@ class COMDistanceReward(ksim.Reward):
     error_scale: float = attrs.field(default=0.25)
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        is_valid_support = trajectory.obs["com_distance"] >= 0.0
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        reward_enabled = is_valid_support & is_zero_cmd
-        com_distance = jnp.where(reward_enabled, trajectory.obs["com_distance"], 0.0)
-        return jnp.exp(-com_distance / self.error_scale)
+        is_valid_support = trajectory.obs["com_distance"] >= 0.0
+        reward = jnp.where(
+            is_valid_support,
+            jnp.where(
+                is_zero_cmd,
+                jnp.exp(-trajectory.obs["com_distance"] / self.error_scale),
+                0.0,
+            ),
+            0.0,
+        )
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -592,8 +599,7 @@ class COMDistanceObservation(ksim.Observation):
 
     @staticmethod
     def monotone_chain_hull(points: Array) -> tuple[Array, Array, Array]:
-        """
-        points: (N,2) float array
+        """points: (N,2) float array
         returns: hull_idx: (M,) int array of indices into points (M <= N),
                 hull_pts: (M,2) points[hull_idx]
         """
@@ -606,11 +612,11 @@ class COMDistanceObservation(ksim.Observation):
             return idxs, pts
 
         # lexicographic sort by x then y
-        order = jnp.lexsort((pts[:,1], pts[:,0])).astype(jnp.int32)
+        order = jnp.lexsort((pts[:, 1], pts[:, 0])).astype(jnp.int32)
         spts = pts[order]
 
         def cross(a, b, c):
-            return (b[0]-a[0])*(c[1]-a[1]) - (b[1]-a[1])*(c[0]-a[0])
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
         def build(indices):
             N = indices.shape[0]
@@ -681,7 +687,7 @@ class COMDistanceObservation(ksim.Observation):
         def num_unique(x: Array) -> Array:
             x = jnp.ravel(contact.geom2)
             sx = jnp.sort(x)
-            diffs = sx[1:] != sx[:-1]          # booleans where value changes
+            diffs = sx[1:] != sx[:-1]  # booleans where value changes
             unique_contacts = jnp.where(x.size == 0, 0, jnp.sum(diffs) + 1)
             return unique_contacts
 
@@ -691,12 +697,10 @@ class COMDistanceObservation(ksim.Observation):
             return jnp.linalg.norm(centroid - base_com[:2])
 
         unique_contacts = num_unique(contact.geom2)
-        
+
         # Only compute hull and distance if we have enough contacts
         return jax.lax.cond(
-            unique_contacts >= 3,
-            lambda: compute_distance(feet_to_floor_contacts, base_subtree_com),
-            lambda: -1.0
+            unique_contacts >= 3, lambda: compute_distance(feet_to_floor_contacts, base_subtree_com), lambda: -1.0
         )
 
 
