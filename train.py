@@ -1181,12 +1181,13 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
             "joint_zero_position": ksim.JointZeroPositionRandomizer(
                 scale_lower=math.radians(-3), scale_upper=math.radians(3)
+                # scale_lower=math.radians(-6), scale_upper=math.radians(6)
             ),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
             "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
-            "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.25),
+            "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.15),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
@@ -1214,8 +1215,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         # bias joint pos: add gaussian 0.05 rad TODOTODOTODO
         return {
             "joint_position": ksim.JointPositionObservation(),
-            "biased_joint_position": BiasedJointPositionObservation(  # TODO might be double with jointzeroposition randomizer
-                bias_range=math.radians(0.05), noise=ksim.AdditiveUniformNoise(mag=math.radians(2))
+            "biased_joint_position": BiasedJointPositionObservation(
+                bias_range=math.radians(3), noise=ksim.AdditiveUniformNoise(mag=math.radians(3))
             ),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
@@ -1257,8 +1258,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 framequat_name="imu_site_quat",
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
-                max_lag=0.1,
-                bias=math.radians(2),  # TODO maybe decrease?
+                max_lag=0.75,
+                bias=math.radians(4),  # TODO maybe decrease?
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
@@ -1838,7 +1839,7 @@ if __name__ == "__main__":
             learning_rate=5e-4,
             gamma=0.9,
             lam=0.94,
-            actor_mirror_loss_scale=1.0,
+            actor_mirror_loss_scale=0.0,
             critic_mirror_loss_scale=0.0,
             hidden_size=256,
             # Simulation parameters.
