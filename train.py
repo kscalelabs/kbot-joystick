@@ -427,7 +427,7 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        straight_foot_euler = jnp.stack(
+        straight_foot_euler = jnp.stack( # TODO this could be way tighter
             [
                 jnp.stack(
                     [
@@ -873,7 +873,6 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
-    clip_positions: ksim.TanhPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
@@ -926,7 +925,6 @@ class Actor(eqx.Module):
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.clip_positions = ksim.TanhPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
@@ -954,9 +952,6 @@ class Actor(eqx.Module):
         # Apply bias to the means
         arm_cmd_bias = jnp.concatenate([jnp.zeros(shape=(10,)), obs_n[..., -10:]], axis=-1)
         mean_n = mean_n + jnp.array(list(JOINT_BIASES.values())) + arm_cmd_bias
-
-        # Clip the target positions to the minimum and maximum ranges.
-        # mean_n = self.clip_positions.clip(mean_n) # TODO disable for now - its bad
 
         # Apply low-pass filter
         mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, self.cutoff_frequency, lpf_params)
