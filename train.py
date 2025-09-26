@@ -503,58 +503,6 @@ class BaseAccelerationReward(ksim.Reward):
         error = jnp.abs(acc).sum(axis=-1)  # (T,)
         return jnp.exp(-error / self.error_scale)
 
-
-@attrs.define(frozen=True, kw_only=True)
-class JointVelocityPenalty(ksim.Reward):
-    """Penalty for how fast the joint angular velocities are changing."""
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos[..., 7:]
-        qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
-        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        return xax.get_norm(qvel, "l2").mean(axis=-1)
-
-
-@attrs.define(frozen=True, kw_only=True)
-class JointAccelerationPenalty(ksim.Reward):
-    """Penalty for high joint accelerations."""
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos[..., 7:]
-        qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
-        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
-        penalty = xax.get_norm(qacc, "l2").mean(axis=-1)
-        return penalty
-
-
-@attrs.define(frozen=True, kw_only=True)
-class CtrlPenalty(ksim.Reward):
-    """Penalty for large torque commands."""
-
-    scales: tuple[float, ...] | None = attrs.field(default=None)
-
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        ctrl = trajectory.ctrl
-        if self.scales is not None:
-            ctrl = ctrl / jnp.array(self.scales)
-        return xax.get_norm(ctrl, "l2").mean(axis=-1)
-
-    @classmethod
-    def create(cls, model: ksim.PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
-        ctrl_min = model.actuator_ctrlrange[..., 0]
-        ctrl_max = model.actuator_ctrlrange[..., 1]
-        ctrl_range = (ctrl_max - ctrl_min) / 2.0
-        ctrl_range_list = ctrl_range.flatten().tolist()
-        return cls(
-            scales=tuple(ctrl_range_list),
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
-        )
-
-
 @attrs.define(frozen=True)
 class COMDistanceObservation(ksim.Observation):
     """Observation of the COM support."""
@@ -1321,9 +1269,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
             "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
-            # "joint_vel": JointVelocityPenalty(scale=-0.05),  # TODO
-            # "joint_accel": JointAccelerationPenalty(scale=-0.05),  # TODO
-            # "ctrl": CtrlPenalty(scale=-0.00001),  # TODO maybe ksim new version?
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -1851,10 +1796,7 @@ if __name__ == "__main__":
             iterations=8,
             ls_iterations=8,
             # sim2real parameters.
-            action_latency_range=(
-                0.003,
-                0.01,
-            ),  # Simulate 3-10ms of latency. # TODO start looking into this, rerun data suggests dt is all over the place.
+            action_latency_range=(0.003, 0.01),  # Simulate 3-10ms of latency.
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
