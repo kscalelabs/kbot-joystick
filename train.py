@@ -1159,7 +1159,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
-        # bias joint pos: add gaussian 0.05 rad TODOTODOTODO
         return {
             "joint_position": ksim.JointPositionObservation(),
             "biased_joint_position": BiasedJointPositionObservation(
