@@ -49,12 +49,12 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_left_hip_roll_03": (-0.20944, 2.268928),
     "dof_left_hip_yaw_03": (-1.570796, 1.570796),
     "dof_left_knee_04": (0.0, 2.70526),
-    "dof_left_ankle_02": (-1.134464, 0.261799),
+    "dof_left_ankle_02": (-1.134464, 0.261799), # real high limit is higher
     "dof_right_hip_pitch_04": (-2.216568, 1.047198),
     "dof_right_hip_roll_03": (-2.268928, 0.20944),
     "dof_right_hip_yaw_03": (-1.570796, 1.570796),
     "dof_right_knee_04": (-2.70526, 0.0),
-    "dof_right_ankle_02": (-0.261799, 1.134464),
+    "dof_right_ankle_02": (-0.261799, 1.134464), # real high limit is higher
     "dof_right_shoulder_pitch_03": (-3.490658, 1.047198),
     "dof_right_shoulder_roll_03": (-1.658063, 0.436332),
     "dof_right_shoulder_yaw_02": (-1.671886, 1.671886),
@@ -1162,7 +1162,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "joint_position": ksim.JointPositionObservation(),
             "biased_joint_position": BiasedJointPositionObservation(
-                bias_range=math.radians(3), noise=ksim.AdditiveUniformNoise(mag=math.radians(3))
+                bias_range=math.radians(3), noise=ksim.AdditiveUniformNoise(mag=math.radians(3))  # 0.05 rad i think
             ),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
@@ -1780,7 +1780,7 @@ if __name__ == "__main__":
             # global_grad_clip=2.0,
             entropy_coef=0.004,
             learning_rate=5e-4,
-            gamma=0.9,
+            gamma=0.94,
             lam=0.94,
             actor_mirror_loss_scale=0.0,
             critic_mirror_loss_scale=0.0,
