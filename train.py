@@ -49,12 +49,12 @@ JOINT_LIMITS: dict[str, tuple[float, float]] = {
     "dof_left_hip_roll_03": (-0.20944, 2.268928),
     "dof_left_hip_yaw_03": (-1.570796, 1.570796),
     "dof_left_knee_04": (0.0, 2.70526),
-    "dof_left_ankle_02": (-1.134464, 0.261799), # real high limit is higher
+    "dof_left_ankle_02": (-1.134464, 0.261799),  # real high limit is higher
     "dof_right_hip_pitch_04": (-2.216568, 1.047198),
     "dof_right_hip_roll_03": (-2.268928, 0.20944),
     "dof_right_hip_yaw_03": (-1.570796, 1.570796),
     "dof_right_knee_04": (-2.70526, 0.0),
-    "dof_right_ankle_02": (-0.261799, 1.134464), # real high limit is higher
+    "dof_right_ankle_02": (-0.261799, 1.134464),  # real high limit is higher
     "dof_right_shoulder_pitch_03": (-3.490658, 1.047198),
     "dof_right_shoulder_roll_03": (-1.658063, 0.436332),
     "dof_right_shoulder_yaw_02": (-1.671886, 1.671886),
@@ -427,7 +427,7 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        straight_foot_euler = jnp.stack( # TODO this could be way tighter
+        straight_foot_euler = jnp.stack(  # TODO this could be way tighter
             [
                 jnp.stack(
                     [
@@ -503,6 +503,7 @@ class BaseAccelerationReward(ksim.Reward):
         error = jnp.abs(acc).sum(axis=-1)  # (T,)
         return jnp.exp(-error / self.error_scale)
 
+
 @attrs.define(frozen=True)
 class COMDistanceObservation(ksim.Observation):
     """Observation of the COM support."""
@@ -510,13 +511,12 @@ class COMDistanceObservation(ksim.Observation):
     @staticmethod
     def polygon_centroid_masked(poly: Array, mask: Array) -> Array:
         # poly: Lx2 padded array, mask: L bool for valid vertices (not necessarily contiguous)
-        L = poly.shape[0]
-        idxs = jnp.arange(L, dtype=jnp.int32)
+        idxs = jnp.arange(poly.shape[0], dtype=jnp.int32)
         mask_i32 = mask.astype(jnp.int32)
         count = jnp.sum(mask_i32)
 
         # Pack valid vertices to the front using nonzero-gather with static size
-        valid_indices = jnp.nonzero(mask, size=L)[0]
+        valid_indices = jnp.nonzero(mask, size=poly.shape[0])[0]
         packed = poly[valid_indices]
 
         # Work on packed vertices; first `count` entries are valid
@@ -547,9 +547,10 @@ class COMDistanceObservation(ksim.Observation):
 
     @staticmethod
     def monotone_chain_hull(points: Array) -> tuple[Array, Array, Array]:
-        """points: (N,2) float array
+        """points: (N,2) float array.
+
         returns: hull_idx: (M,) int array of indices into points (M <= N),
-                hull_pts: (M,2) points[hull_idx]
+                hull_pts: (M,2) points[hull_idx].
         """
         pts = jnp.asarray(points)
         n = pts.shape[0]
@@ -563,18 +564,17 @@ class COMDistanceObservation(ksim.Observation):
         order = jnp.lexsort((pts[:, 1], pts[:, 0])).astype(jnp.int32)
         spts = pts[order]
 
-        def cross(a, b, c):
+        def cross(a: Array, b: Array, c: Array) -> Array:
             return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
 
-        def build(indices):
-            N = indices.shape[0]
-            stack = -jnp.ones((N,), dtype=jnp.int32)
+        def build(indices: Array) -> tuple[Array, int]:
+            stack = -jnp.ones((indices.shape[0],), dtype=jnp.int32)
             ptr0 = jnp.int32(0)
 
-            def push(carry, idx):
+            def push(carry: tuple[Array, int], idx: int) -> tuple[tuple[Array, int], None]:
                 stack, ptr = carry
 
-                def cond_fn(carry_inner):
+                def cond_fn(carry_inner: tuple[Array, int]) -> bool:
                     stack_i, ptr_i = carry_inner
                     # need ptr_i >= 2 and cross <= 0
                     a_idx = stack_i[ptr_i - 2]
@@ -582,7 +582,7 @@ class COMDistanceObservation(ksim.Observation):
                     # compute cross on sorted points
                     return (ptr_i >= 2) & (cross(spts[a_idx], spts[b_idx], spts[idx]) <= 0)
 
-                def body_fn(carry_inner):
+                def body_fn(carry_inner: tuple[Array, int]) -> tuple[Array, int]:
                     stack_i, ptr_i = carry_inner
                     # pop last
                     stack_i = stack_i.at[ptr_i - 1].set(-1)
@@ -1127,7 +1127,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
             "joint_zero_position": ksim.JointZeroPositionRandomizer(
-                scale_lower=math.radians(-3), scale_upper=math.radians(3)
+                scale_lower=math.radians(-3),
+                scale_upper=math.radians(3),
                 # scale_lower=math.radians(-6), scale_upper=math.radians(6)
             ),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
@@ -1162,7 +1163,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "joint_position": ksim.JointPositionObservation(),
             "biased_joint_position": BiasedJointPositionObservation(
-                bias_range=math.radians(3), noise=ksim.AdditiveUniformNoise(mag=math.radians(3))  # 0.05 rad i think
+                bias_range=math.radians(3),
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(3)),  # 0.05 rad i think
             ),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
@@ -1238,7 +1240,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location. should be at base pitch axis.
+            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
