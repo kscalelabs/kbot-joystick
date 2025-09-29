@@ -1126,11 +1126,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "armature": ksim.ArmatureRandomizer(),
             # "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
-            "joint_zero_position": ksim.JointZeroPositionRandomizer(
-                scale_lower=math.radians(-3),
-                scale_upper=math.radians(3),
-                # scale_lower=math.radians(-6), scale_upper=math.radians(6)
-            ),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
