@@ -207,6 +207,28 @@ class FeetAirtimeReward(ksim.StatefulReward):
         airtime = jnp.concatenate([airtime_carry[None, :], airtime], axis=0)[:-1, :]
         reward = jnp.sum((airtime - self.touchdown_penalty) * first_contact.astype(jnp.float32), axis=-1)
 
+        # Debug: check if any reward value is lower than -0.76
+        def _check_reward(reward, airtime_carry, contact_carry, traj_done, left_touch, right_touch):
+            min_reward = jnp.min(reward)
+            if min_reward < -0.76:
+                print("ASSERTION FAILED: reward < -0.76")
+                print(f"  reward: {reward}")
+                print(f"  airtime_carry: {airtime_carry}")
+                print(f"  contact_carry: {contact_carry}")
+                print(f"  traj.done: {traj_done}")
+                print(f"  left_foot_touch: {left_touch}")
+                print(f"  right_foot_touch: {right_touch}")
+        
+        jax.debug.callback(
+            _check_reward, 
+            reward, 
+            airtime_carry, 
+            contact_carry, 
+            traj.done,
+            traj.obs["left_foot_touch"],
+            traj.obs["right_foot_touch"],
+        )
+
         is_zero_cmd = jnp.linalg.norm(traj.command["unified_command"][:, :3], axis=-1) < 1e-3
         reward = jnp.where(is_zero_cmd, 0.0, reward)
         reward_carry = (new_airtime_carry, contact[-1, :])
