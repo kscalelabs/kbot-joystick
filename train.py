@@ -129,7 +129,6 @@ class SingleFootContactReward(ksim.StatefulReward):
     Allows for small grace period when both feet are in contact for less jumpy gaits.
     """
 
-    scale: float = 1.0
     ctrl_dt: float = 0.02
     grace_period: float = 0.2  # seconds
 
@@ -159,8 +158,6 @@ class SingleFootContactReward(ksim.StatefulReward):
 class NoContactPenalty(ksim.Reward):
     """Penalty for having no contact with the ground when walking."""
 
-    scale: float = -0.1
-
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         left_contact = jnp.where(traj.obs["left_foot_touch"] > 0.1, True, False)[:, 0]
         right_contact = jnp.where(traj.obs["right_foot_touch"] > 0.1, True, False)[:, 0]
@@ -172,10 +169,8 @@ class NoContactPenalty(ksim.Reward):
 class FeetAirtimeReward(ksim.StatefulReward):
     """Encourages reasonable step frequency by rewarding long swing phases and penalizing quick stepping."""
 
-    scale: float = 1.0
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
-    scale_by_curriculum: bool = False
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         airtime_carry = jnp.array([0.0, 0.0])
@@ -236,7 +231,6 @@ class ArmPositionReward(ksim.Reward):
         physics_model: ksim.PhysicsModel,
         scale: float = 0.05,
         error_scale: float = 0.1,
-        scale_by_curriculum: bool = False,
     ) -> Self:
         # Define the arm joint names in order
         joint_names = (
@@ -262,7 +256,6 @@ class ArmPositionReward(ksim.Reward):
             joint_biases=joint_biases,
             error_scale=error_scale,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
@@ -506,7 +499,12 @@ class BaseAccelerationReward(ksim.Reward):
 
 @attrs.define(frozen=True)
 class COMDistanceObservation(ksim.Observation):
-    """Observation of the COM support."""
+    """Observes the distance between the robot's center of mass (COM) and the centroid of its support polygon.
+
+    The support polygon is formed by the contact points between the robot's feet and the ground.
+    A negative value indicates invalid support (e.g. robot is airborne), while a positive value represents
+    the actual distance between COM and support polygon centroid.
+    """
 
     @staticmethod
     def polygon_centroid_masked(poly: Array, mask: Array) -> Array:
@@ -840,6 +838,7 @@ class PlaneXYPositionReset(ksim.Reset):
         return data
 
 
+# TODO get this from ksim
 @attrs.define(frozen=True, kw_only=True)
 class BiasedJointPositionObservation(ksim.StatefulObservation):
     """Observes joint positions with an added bias in addition to noise."""
@@ -1248,7 +1247,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
-            "no_contact_p": NoContactPenalty(scale=-0.1),
+            "no_contact_p": NoContactPenalty(scale=0.1),
             "feet_airtime": FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             "feet_orient": FeetOrientationReward.create(
                 physics_model=physics_model,
@@ -1260,7 +1259,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
+            "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
