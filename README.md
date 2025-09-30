@@ -1,5 +1,5 @@
 <div align="center">
-<h1>Kbot-Joystic</h1>
+<h1>Kbot-Joystick</h1>
 <p>Train and deploy your own humanoid robot controller in 1k lines of Python</p>
 <h3>
   <a href="https://url.kscale.dev/docs">Documentation</a> ·
