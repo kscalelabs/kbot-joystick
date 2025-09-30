@@ -112,7 +112,7 @@ mpmath==1.3.0
 msgpack==1.1.0
 mujoco==3.3.5
 mujoco-mjx==3.3.5
--e git+https://github.com/b-vm/mujoco-scenes@24c6834db5ef383c773659f1216988685b664fca#egg=mujoco_scenes
+-e git+https://github.com/kscalelabs/mujoco-scenes@c897d9c11cfd01a191e5025b5dde0459d093eddc#egg=mujoco_scenes
 multidict==6.4.3
 namex==0.0.9
 nbclient==0.10.2
