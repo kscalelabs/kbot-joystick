@@ -174,7 +174,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         airtime_carry = jnp.array([0.0, 0.0])
-        contact_carry = jnp.array([False, False])
+        contact_carry = jnp.array([True, True])
         return airtime_carry, contact_carry
 
     def _compute_airtime(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
@@ -211,6 +211,18 @@ class FeetAirtimeReward(ksim.StatefulReward):
         def _check_reward(reward, airtime_carry, contact_carry, traj_done, left_touch, right_touch):
             min_reward = jnp.min(reward)
             if min_reward < -0.76:
+                import time
+                import os
+                timestamp = time.strftime("%Y%m%d-%H%M%S")
+                logpath = os.path.expanduser(f"~/runlogs/{timestamp}")
+                with open(logpath, "w") as f:
+                    print("ASSERTION FAILED: reward < -0.76", file=f)
+                    print(f"  reward: {reward}", file=f)
+                    print(f"  airtime_carry: {airtime_carry}", file=f) 
+                    print(f"  contact_carry: {contact_carry}", file=f)
+                    print(f"  traj.done: {traj_done}", file=f)
+                    print(f"  left_foot_touch: {left_touch}", file=f)
+                    print(f"  right_foot_touch: {right_touch}", file=f)
                 print("ASSERTION FAILED: reward < -0.76")
                 print(f"  reward: {reward}")
                 print(f"  airtime_carry: {airtime_carry}")
@@ -1195,8 +1207,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 framequat_name="imu_site_quat",
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
-                max_lag=0.75,
-                bias=math.radians(4),  # TODO maybe decrease?
+                max_lag=0.75, # 0.75 is effectively 3 timesteps so 60ms
+                bias=math.radians(4),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
