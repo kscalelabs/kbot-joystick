@@ -1,6 +1,14 @@
-<mujoco model="assy_forurdf_kdheadless">
+<mujoco model="assy_forurdf">
   <default>
     <default class="robot">
+      <default class="robstride_03">
+        <joint armature="0.02" frictionloss="0.2" actuatorfrcrange="-60.0 60.0" />
+        <motor ctrlrange="-60.0 60.0" />
+      </default>
+      <default class="robstride_02">
+        <joint armature="0.0042" frictionloss="0.1" actuatorfrcrange="-17.0 17.0" />
+        <motor ctrlrange="-17.0 17.0" />
+      </default>
       <default class="robstride_04">
         <joint armature="0.04" frictionloss="0.2" actuatorfrcrange="-120.0 120.0" />
         <motor ctrlrange="-120.0 120.0" />
@@ -8,14 +16,6 @@
       <default class="robstride_00">
         <joint armature="0.001" frictionloss="0.1" actuatorfrcrange="-14.0 14.0" />
         <motor ctrlrange="-14.0 14.0" />
-      </default>
-      <default class="robstride_02">
-        <joint armature="0.0042" frictionloss="0.1" actuatorfrcrange="-17.0 17.0" />
-        <motor ctrlrange="-17.0 17.0" />
-      </default>
-      <default class="robstride_03">
-        <joint armature="0.02" frictionloss="0.2" actuatorfrcrange="-60.0 60.0" />
-        <motor ctrlrange="-60.0 60.0" />
       </default>
       <default class="visual">
         <geom material="visualgeom" contype="0" conaffinity="0" group="2" />
