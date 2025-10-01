@@ -21,7 +21,7 @@
         <geom material="visualgeom" contype="0" conaffinity="0" group="2" />
       </default>
       <default class="collision">
-        <geom material="collision_material" condim="3" contype="0" conaffinity="1" priority="1" group="1" solref="0.005 1" solimp="0.99 0.999 1e-05" friction="0.64 0.02 0.01" />
+        <geom material="collision_material" condim="3" contype="0" conaffinity="1" priority="1" group="1" solref="0.02 0.8" solimp="0.99 0.999 1e-05" friction="0.64 0.02 0.01" />
       </default>
     </default>
     <mesh maxhullvert="64" />
