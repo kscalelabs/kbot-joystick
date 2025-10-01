@@ -1,0 +1,533 @@
+<?xml version="1.0" ?>
+<robot name="assy_forurdf">
+  <link name="base">
+    <visual name="base_visual">
+      <geometry name="base_geometry">
+        <sphere radius="0.01"/>
+      </geometry>
+      <material name="base_material">
+        <color rgba="1 0 0 1"/>
+      </material>
+      <origin xyz="0 0.035 0" rpy="0 0 1.5708"/>
+    </visual>
+    <inertial name="base_inertial">
+      <mass value="0.001"/>
+      <inertia ixx="0.000001" iyy="0.000001" izz="0.000001" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="0 0.035 0" rpy="0 0 1.5708"/>
+    </inertial>
+  </link>
+  <joint name="base_joint" type="fixed">
+    <parent link="base"/>
+    <child link="KD_D_101L_L_Hip_Static"/>
+    <origin xyz="0 0.035 0" rpy="0 0 1.5708"/>
+  </joint>
+  <joint name="dof_left_hip_pitch_04" type="revolute">
+    <origin xyz="0.030112 0.000852 -0.027644" rpy="-1.570796 0 1.570796"/>
+    <parent link="KD_D_101L_L_Hip_Static"/>
+    <child link="KD_D_102L_L_Hip_Yoke_Drive"/>
+    <limit effort="120" velocity="17.488" lower="-1.047198" upper="2.216568"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_hip_roll_03" type="revolute">
+    <origin xyz="-0.028250 0.030000 -0.071000" rpy="3.141593 -1.570796 0"/>
+    <parent link="KD_D_102L_L_Hip_Yoke_Drive"/>
+    <child link="L_Hip_Roll_RS03"/>
+    <limit effort="60" velocity="18.849" lower="-0.209440" upper="2.268928"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_right_hip_pitch_04" type="revolute">
+    <origin xyz="-0.081888 0.000852 -0.027644" rpy="1.570796 0 1.570796"/>
+    <parent link="KD_D_101L_L_Hip_Static"/>
+    <child link="KD_D_102R"/>
+    <limit effort="120" velocity="17.488" lower="-2.216568" upper="1.047198"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_right_shoulder_pitch_03" type="revolute">
+    <origin xyz="-0.146888 0.000852 0.382856" rpy="0 -1.570796 0"/>
+    <parent link="KD_D_101L_L_Hip_Static"/>
+    <child link="KC_C_101R_ShldYokeDrive"/>
+    <limit effort="60" velocity="18.849" lower="-3.490658" upper="1.047198"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_left_shoulder_pitch_03" type="revolute">
+    <origin xyz="0.095112 0.000852 0.382856" rpy="0 1.570796 0"/>
+    <parent link="KD_D_101L_L_Hip_Static"/>
+    <child link="KD_C_101L_ShldYokeDrive"/>
+    <limit effort="60" velocity="18.849" lower="-1.047198" upper="3.490658"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_right_hip_roll_03" type="revolute">
+    <origin xyz="-0.028250 -0.030000 -0.071000" rpy="0 -1.570796 0"/>
+    <parent link="KD_D_102R"/>
+    <child link="L_Hip_Roll_RS03_2"/>
+    <limit effort="60" velocity="18.849" lower="-2.268928" upper="0.209440"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_right_shoulder_roll_03" type="revolute">
+    <origin xyz="0 -0.024250 0.080000" rpy="1.570796 1.570796 0"/>
+    <parent link="KC_C_101R_ShldYokeDrive"/>
+    <child link="RS03_3"/>
+    <limit effort="60" velocity="18.849" lower="-1.658063" upper="0.436332"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="frame_imu_site" type="fixed">
+    <origin xyz="-0.025422 -0.001897 0.440523" rpy="0 0 0"/>
+    <parent link="KD_D_101L_L_Hip_Static"/>
+    <child link="imu"/>
+  </joint>
+  <joint name="dof_left_shoulder_roll_03" type="revolute">
+    <origin xyz="0 -0.024250 0.080000" rpy="1.570796 -1.570796 0"/>
+    <parent link="KD_C_101L_ShldYokeDrive"/>
+    <child link="RS03_4"/>
+    <limit effort="60" velocity="18.849" lower="-0.436332" upper="1.658063"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_hip_yaw_03" type="revolute">
+    <origin xyz="0 -0.143000 0.025250" rpy="1.570796 0 -3.141593"/>
+    <parent link="L_Hip_Roll_RS03"/>
+    <child link="KD_D_301L_L_Femur_Lower_Drive"/>
+    <limit effort="60" velocity="18.849" lower="-1.570796" upper="1.570796"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_right_hip_yaw_03" type="revolute">
+    <origin xyz="0 -0.143000 -0.025250" rpy="-1.570796 0 0"/>
+    <parent link="L_Hip_Roll_RS03_2"/>
+    <child link="KD_D_301R"/>
+    <limit effort="60" velocity="18.849" lower="-1.570796" upper="1.570796"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_right_shoulder_yaw_02" type="revolute">
+    <origin xyz="-0.013000 -0.142500 -0.031670" rpy="-1.570796 0 0"/>
+    <parent link="RS03_3"/>
+    <child link="KC_C_202R"/>
+    <limit effort="17" velocity="37.699" lower="-1.671886" upper="1.671886"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_shoulder_yaw_02" type="revolute">
+    <origin xyz="0.013000 -0.142500 -0.030750" rpy="-1.570796 0 0"/>
+    <parent link="RS03_4"/>
+    <child link="KD_C_301L_LowerBicepDrive"/>
+    <limit effort="17" velocity="37.699" lower="-1.671886" upper="1.671886"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_knee_04" type="revolute">
+    <origin xyz="-0.021000 0.021000 -0.212000" rpy="1.570796 0 1.570796"/>
+    <parent link="KD_D_301L_L_Femur_Lower_Drive"/>
+    <child link="KD_D_401L_L_Shin_Drive"/>
+    <limit effort="120" velocity="17.488" lower="0" upper="2.705260"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_ankle_02" type="revolute">
+    <origin xyz="-0.030000 -0.290000 0.000950" rpy="3.141593 0 0"/>
+    <parent link="KD_D_401L_L_Shin_Drive"/>
+    <child link="LFootBushing_GPF_1517_12"/>
+    <limit effort="17" velocity="37.699" lower="-1.134464" upper="0.261799"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_right_knee_04" type="revolute">
+    <origin xyz="0.021000 0.021000 -0.212000" rpy="1.570796 0 1.570796"/>
+    <parent link="KD_D_301R"/>
+    <child link="KD_D_401R"/>
+    <limit effort="120" velocity="17.488" lower="-2.705260" upper="0"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_right_elbow_02" type="revolute">
+    <origin xyz="0.019000 -0.010000 -0.137000" rpy="-1.570796 0 1.570796"/>
+    <parent link="KC_C_202R"/>
+    <child link="KC_C_401R_R_UpForearmDrive"/>
+    <limit effort="17" velocity="37.699" lower="0" upper="2.478368"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_left_elbow_02" type="revolute">
+    <origin xyz="-0.019000 -0.010000 -0.137000" rpy="1.570796 0 1.570796"/>
+    <parent link="KD_C_301L_LowerBicepDrive"/>
+    <child link="KC_C_401L_Up_Forearm_Drive"/>
+    <limit effort="17" velocity="37.699" lower="-2.478368" upper="0"/>
+    <axis xyz="0 0 1"/>
+  </joint>
+  <joint name="dof_right_ankle_02" type="revolute">
+    <origin xyz="-0.030000 -0.290000 -0.000950" rpy="0 0 0"/>
+    <parent link="KD_D_401R"/>
+    <child link="RFootBushing_GPF_1517_12"/>
+    <limit effort="17" velocity="37.699" lower="-0.261799" upper="1.134464"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_right_wrist_00" type="revolute">
+    <origin xyz="0.017350 0.103000 0.018000" rpy="-1.570796 1.570796 0"/>
+    <parent link="KC_C_401R_R_UpForearmDrive"/>
+    <child link="PRT0001"/>
+    <limit effort="14" velocity="27.227" lower="-1.378810" upper="1.378810"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <joint name="dof_left_wrist_00" type="revolute">
+    <origin xyz="0.017350 -0.103000 0.018000" rpy="1.570796 -1.570796 0"/>
+    <parent link="KC_C_401L_Up_Forearm_Drive"/>
+    <child link="PRT0001_2"/>
+    <limit effort="14" velocity="27.227" lower="-1.378810" upper="1.378810"/>
+    <axis xyz="0 0 -1"/>
+  </joint>
+  <link name="KD_D_101L_L_Hip_Static">
+    <visual name="KD_D_101L_L_Hip_Static_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_101L_L_Hip_Static_geometry">
+        <mesh filename="meshes/KD_D_101L_L_Hip_Static.stl"/>
+      </geometry>
+      <material name="KD_D_101L_L_Hip_Static_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_101L_L_Hip_Static_inertial">
+      <mass value="12.606875"/>
+      <inertia ixx="0.369404" iyy="0.398554" izz="0.058070" ixy="0.000002" ixz="0.000012" iyz="-0.001584"/>
+      <origin xyz="-0.025920 0.003286 0.170540" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_102L_L_Hip_Yoke_Drive">
+    <visual name="KD_D_102L_L_Hip_Yoke_Drive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_102L_L_Hip_Yoke_Drive_geometry">
+        <mesh filename="meshes/KD_D_102L_L_Hip_Yoke_Drive.stl"/>
+      </geometry>
+      <material name="KD_D_102L_L_Hip_Yoke_Drive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_102L_L_Hip_Yoke_Drive_inertial">
+      <mass value="0.550354"/>
+      <inertia ixx="0.000930" iyy="0.001251" izz="0.001328" ixy="0.000057" ixz="-0.000041" iyz="0.000182"/>
+      <origin xyz="-0.004258 0.005667 -0.040380" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="L_Hip_Roll_RS03">
+    <visual name="L_Hip_Roll_RS03_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="L_Hip_Roll_RS03_geometry">
+        <mesh filename="meshes/L_Hip_Roll_RS03.stl"/>
+      </geometry>
+      <material name="L_Hip_Roll_RS03_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="L_Hip_Roll_RS03_inertial">
+      <mass value="2.396969"/>
+      <inertia ixx="0.010350" iyy="0.003224" izz="0.010755" ixy="0.000002" ixz="0.000009" iyz="-0.000303"/>
+      <origin xyz="-0.000136 -0.059376 0.026066" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_102R">
+    <visual name="KD_D_102R_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_102R_geometry">
+        <mesh filename="meshes/KD_D_102R.stl"/>
+      </geometry>
+      <material name="KD_D_102R_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_102R_inertial">
+      <mass value="0.550361"/>
+      <inertia ixx="0.000930" iyy="0.001251" izz="0.001328" ixy="-0.000057" ixz="-0.000041" iyz="-0.000182"/>
+      <origin xyz="-0.004258 -0.005667 -0.040379" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KC_C_101R_ShldYokeDrive">
+    <visual name="KC_C_101R_ShldYokeDrive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KC_C_101R_ShldYokeDrive_geometry">
+        <mesh filename="meshes/KC_C_101R_ShldYokeDrive.stl"/>
+      </geometry>
+      <material name="KC_C_101R_ShldYokeDrive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KC_C_101R_ShldYokeDrive_inertial">
+      <mass value="0.569870"/>
+      <inertia ixx="0.001409" iyy="0.001159" izz="0.001309" ixy="0" ixz="0.000001" iyz="0.000162"/>
+      <origin xyz="0.003158 -0.007737 0.047375" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_C_101L_ShldYokeDrive">
+    <visual name="KD_C_101L_ShldYokeDrive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_C_101L_ShldYokeDrive_geometry">
+        <mesh filename="meshes/KD_C_101L_ShldYokeDrive.stl"/>
+      </geometry>
+      <material name="KD_C_101L_ShldYokeDrive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_C_101L_ShldYokeDrive_inertial">
+      <mass value="0.569863"/>
+      <inertia ixx="0.001409" iyy="0.001159" izz="0.001309" ixy="0" ixz="-0.000001" iyz="0.000162"/>
+      <origin xyz="-0.003158 -0.007737 0.047374" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="L_Hip_Roll_RS03_2">
+    <visual name="L_Hip_Roll_RS03_visual_2">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="L_Hip_Roll_RS03_geometry_2">
+        <mesh filename="meshes/L_Hip_Roll_RS03_2.stl"/>
+      </geometry>
+      <material name="L_Hip_Roll_RS03_material_2">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="L_Hip_Roll_RS03_inertial_2">
+      <mass value="2.396917"/>
+      <inertia ixx="0.010350" iyy="0.003224" izz="0.010755" ixy="0.000002" ixz="-0.000009" iyz="0.000303"/>
+      <origin xyz="-0.000137 -0.059376 -0.026067" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="RS03_3">
+    <visual name="RS03_visual_3">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="RS03_geometry_3">
+        <mesh filename="meshes/RS03_3.stl"/>
+      </geometry>
+      <material name="RS03_material_3">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="RS03_inertial_3">
+      <mass value="1.789232"/>
+      <inertia ixx="0.007176" iyy="0.001972" izz="0.007602" ixy="-0.000597" ixz="-0.000001" iyz="-0.000081"/>
+      <origin xyz="-0.004909 -0.041175 -0.029409" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="imu">
+    <visual name="imu_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="imu_geometry">
+        <mesh filename="meshes/imu.stl"/>
+      </geometry>
+      <material name="imu_material">
+        <color rgba="0.498039 0.498039 0.498039 1"/>
+      </material>
+    </visual>
+    <inertial name="imu_inertial">
+      <mass value="0.005700"/>
+      <inertia ixx="0.000001" iyy="0.000001" izz="0.000002" ixy="0" ixz="0" iyz="0"/>
+      <origin xyz="-0.003012 0 0.002999" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="RS03_4">
+    <visual name="RS03_visual_4">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="RS03_geometry_4">
+        <mesh filename="meshes/RS03_4.stl"/>
+      </geometry>
+      <material name="RS03_material_4">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="RS03_inertial_4">
+      <mass value="1.789191"/>
+      <inertia ixx="0.007175" iyy="0.001972" izz="0.007602" ixy="0.000599" ixz="0.000012" iyz="-0.000104"/>
+      <origin xyz="0.004876 -0.041173 -0.029352" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_301L_L_Femur_Lower_Drive">
+    <visual name="KD_D_301L_L_Femur_Lower_Drive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_301L_L_Femur_Lower_Drive_geometry">
+        <mesh filename="meshes/KD_D_301L_L_Femur_Lower_Drive.stl"/>
+      </geometry>
+      <material name="KD_D_301L_L_Femur_Lower_Drive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_301L_L_Femur_Lower_Drive_inertial">
+      <mass value="2.349254"/>
+      <inertia ixx="0.015361" iyy="0.013924" izz="0.004011" ixy="-0.000189" ixz="0.001119" iyz="0.001496"/>
+      <origin xyz="0.001576 0.013392 -0.172799" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_301R">
+    <visual name="KD_D_301R_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_301R_geometry">
+        <mesh filename="meshes/KD_D_301R.stl"/>
+      </geometry>
+      <material name="KD_D_301R_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_301R_inertial">
+      <mass value="2.349261"/>
+      <inertia ixx="0.015362" iyy="0.013924" izz="0.004011" ixy="0.000189" ixz="-0.001119" iyz="0.001496"/>
+      <origin xyz="-0.001577 0.013392 -0.172799" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KC_C_202R">
+    <visual name="KC_C_202R_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KC_C_202R_geometry">
+        <mesh filename="meshes/KC_C_202R.stl"/>
+      </geometry>
+      <material name="KC_C_202R_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KC_C_202R_inertial">
+      <mass value="0.753224"/>
+      <inertia ixx="0.002457" iyy="0.002305" izz="0.000727" ixy="-0.000034" ixz="-0.000250" iyz="-0.000139"/>
+      <origin xyz="0.003135 -0.003955 -0.099599" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_C_301L_LowerBicepDrive">
+    <visual name="KD_C_301L_LowerBicepDrive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_C_301L_LowerBicepDrive_geometry">
+        <mesh filename="meshes/KD_C_301L_LowerBicepDrive.stl"/>
+      </geometry>
+      <material name="KD_C_301L_LowerBicepDrive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_C_301L_LowerBicepDrive_inertial">
+      <mass value="0.866827"/>
+      <inertia ixx="0.002953" iyy="0.002777" izz="0.000923" ixy="0.000016" ixz="0.000145" iyz="-0.000150"/>
+      <origin xyz="0.000333 -0.002948 -0.095705" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_401L_L_Shin_Drive">
+    <visual name="KD_D_401L_L_Shin_Drive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_401L_L_Shin_Drive_geometry">
+        <mesh filename="meshes/KD_D_401L_L_Shin_Drive.stl"/>
+      </geometry>
+      <material name="KD_D_401L_L_Shin_Drive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_401L_L_Shin_Drive_inertial">
+      <mass value="1.684707"/>
+      <inertia ixx="0.014785" iyy="0.002991" izz="0.014664" ixy="-0.000101" ixz="0.000022" iyz="0.000493"/>
+      <origin xyz="-0.024116 -0.104308 0.018559" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="LFootBushing_GPF_1517_12">
+    <visual name="LFootBushing_GPF_1517_12_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="LFootBushing_GPF_1517_12_geometry">
+        <mesh filename="meshes/LFootBushing_GPF_1517_12.stl"/>
+      </geometry>
+      <material name="LFootBushing_GPF_1517_12_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <collision name="LFootBushing_GPF_1517_12_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="LFootBushing_GPF_1517_12_collision_geometry">
+        <mesh filename="meshes/LFootBushing_GPF_1517_12_collision.stl"/>
+      </geometry>
+    </collision>
+    <inertial name="LFootBushing_GPF_1517_12_inertial">
+      <mass value="0.608966"/>
+      <inertia ixx="0.000377" iyy="0.001940" izz="0.001893" ixy="0.000126" ixz="-0.000025" iyz="0.000027"/>
+      <origin xyz="-0.016549 0.031142 -0.012943" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KD_D_401R">
+    <visual name="KD_D_401R_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KD_D_401R_geometry">
+        <mesh filename="meshes/KD_D_401R.stl"/>
+      </geometry>
+      <material name="KD_D_401R_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KD_D_401R_inertial">
+      <mass value="1.684717"/>
+      <inertia ixx="0.014785" iyy="0.002991" izz="0.014664" ixy="-0.000101" ixz="-0.000022" iyz="-0.000494"/>
+      <origin xyz="-0.024117 -0.104310 -0.018558" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KC_C_401R_R_UpForearmDrive">
+    <visual name="KC_C_401R_R_UpForearmDrive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KC_C_401R_R_UpForearmDrive_geometry">
+        <mesh filename="meshes/KC_C_401R_R_UpForearmDrive.stl"/>
+      </geometry>
+      <material name="KC_C_401R_R_UpForearmDrive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KC_C_401R_R_UpForearmDrive_inertial">
+      <mass value="0.641859"/>
+      <inertia ixx="0.001302" iyy="0.000701" izz="0.001278" ixy="-0.000051" ixz="-0.000010" iyz="-0.000045"/>
+      <origin xyz="0.015853 0.061198 0.015613" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="KC_C_401L_Up_Forearm_Drive">
+    <visual name="KC_C_401L_Up_Forearm_Drive_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="KC_C_401L_Up_Forearm_Drive_geometry">
+        <mesh filename="meshes/KC_C_401L_Up_Forearm_Drive.stl"/>
+      </geometry>
+      <material name="KC_C_401L_Up_Forearm_Drive_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="KC_C_401L_Up_Forearm_Drive_inertial">
+      <mass value="0.641873"/>
+      <inertia ixx="0.001303" iyy="0.000701" izz="0.001278" ixy="0.000051" ixz="-0.000010" iyz="0.000048"/>
+      <origin xyz="0.015853 -0.061197 0.015921" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="RFootBushing_GPF_1517_12">
+    <visual name="RFootBushing_GPF_1517_12_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="RFootBushing_GPF_1517_12_geometry">
+        <mesh filename="meshes/RFootBushing_GPF_1517_12.stl"/>
+      </geometry>
+      <material name="RFootBushing_GPF_1517_12_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <collision name="RFootBushing_GPF_1517_12_collision">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="RFootBushing_GPF_1517_12_collision_geometry">
+        <mesh filename="meshes/RFootBushing_GPF_1517_12_collision.stl"/>
+      </geometry>
+    </collision>
+    <inertial name="RFootBushing_GPF_1517_12_inertial">
+      <mass value="0.608742"/>
+      <inertia ixx="0.000377" iyy="0.001939" izz="0.001892" ixy="-0.000126" ixz="-0.000025" iyz="-0.000027"/>
+      <origin xyz="-0.016546 -0.031136 -0.012942" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="PRT0001">
+    <visual name="PRT0001_visual">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="PRT0001_geometry">
+        <mesh filename="meshes/PRT0001.stl"/>
+      </geometry>
+      <material name="PRT0001_material">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="PRT0001_inertial">
+      <mass value="0.462356"/>
+      <inertia ixx="0.000274" iyy="0.000266" izz="0.000406" ixy="0" ixz="0.000002" iyz="0"/>
+      <origin xyz="0.000357 0.000031 0.027390" rpy="0 0 0"/>
+    </inertial>
+  </link>
+  <link name="PRT0001_2">
+    <visual name="PRT0001_visual_2">
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <geometry name="PRT0001_geometry_2">
+        <mesh filename="meshes/PRT0001_2.stl"/>
+      </geometry>
+      <material name="PRT0001_material_2">
+        <color rgba="0.121569 0.121569 0.121569 1"/>
+      </material>
+    </visual>
+    <inertial name="PRT0001_inertial_2">
+      <mass value="0.462356"/>
+      <inertia ixx="0.000274" iyy="0.000266" izz="0.000406" ixy="0" ixz="-0.000002" iyz="0"/>
+      <origin xyz="-0.000357 -0.000031 0.027390" rpy="0 0 0"/>
+    </inertial>
+  </link>
+</robot>
