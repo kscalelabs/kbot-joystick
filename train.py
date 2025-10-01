@@ -21,28 +21,53 @@ from jaxtyping import Array, PRNGKeyArray, PyTree
 
 # These are in the order of the neural network outputs.
 # Joint name, neutral position
-JOINT_BIASES: list[tuple[str, float]] = [
-    ("dof_right_shoulder_pitch_03", 0.0),
-    ("dof_right_shoulder_roll_03", math.radians(-10.0)),
-    ("dof_right_shoulder_yaw_02", 0.0),
-    ("dof_right_elbow_02", math.radians(90.0)),
-    ("dof_right_wrist_00", 0.0),
-    ("dof_left_shoulder_pitch_03", 0.0),
-    ("dof_left_shoulder_roll_03", math.radians(10.0)),
-    ("dof_left_shoulder_yaw_02", 0.0),
-    ("dof_left_elbow_02", math.radians(-90.0)),
-    ("dof_left_wrist_00", 0.0),
-    ("dof_right_hip_pitch_04", math.radians(-20.0)),
-    ("dof_right_hip_roll_03", math.radians(-0.0)),
-    ("dof_right_hip_yaw_03", 0.0),
-    ("dof_right_knee_04", math.radians(-50.0)),
-    ("dof_right_ankle_02", math.radians(30.0)),
-    ("dof_left_hip_pitch_04", math.radians(20.0)),
-    ("dof_left_hip_roll_03", math.radians(0.0)),
-    ("dof_left_hip_yaw_03", 0.0),
-    ("dof_left_knee_04", math.radians(50.0)),
-    ("dof_left_ankle_02", math.radians(-30.0)),
-]
+JOINT_BIASES: dict[str, float] = {
+    "dof_left_hip_pitch_04": math.radians(20.0),
+    "dof_left_hip_roll_03": math.radians(0.0),
+    "dof_left_hip_yaw_03": 0.0,
+    "dof_left_knee_04": math.radians(50.0),
+    "dof_left_ankle_02": math.radians(-30.0),
+    "dof_right_hip_pitch_04": math.radians(-20.0),
+    "dof_right_hip_roll_03": math.radians(-0.0),
+    "dof_right_hip_yaw_03": 0.0,
+    "dof_right_knee_04": math.radians(-50.0),
+    "dof_right_ankle_02": math.radians(30.0),
+    "dof_right_shoulder_pitch_03": 0.0,
+    "dof_right_shoulder_roll_03": math.radians(-10.0),
+    "dof_right_shoulder_yaw_02": 0.0,
+    "dof_right_elbow_02": math.radians(90.0),
+    "dof_right_wrist_00": 0.0,
+    "dof_left_shoulder_pitch_03": 0.0,
+    "dof_left_shoulder_roll_03": math.radians(10.0),
+    "dof_left_shoulder_yaw_02": 0.0,
+    "dof_left_elbow_02": math.radians(-90.0),
+    "dof_left_wrist_00": 0.0,
+}
+
+JOINT_LIMITS: dict[str, tuple[float, float]] = {
+    "dof_left_hip_pitch_04": (-1.047198, 2.216568),
+    "dof_left_hip_roll_03": (-0.20944, 2.268928),
+    "dof_left_hip_yaw_03": (-1.570796, 1.570796),
+    "dof_left_knee_04": (0.0, 2.70526),
+    "dof_left_ankle_02": (-1.134464, 0.261799),  # real high limit is higher
+    "dof_right_hip_pitch_04": (-2.216568, 1.047198),
+    "dof_right_hip_roll_03": (-2.268928, 0.20944),
+    "dof_right_hip_yaw_03": (-1.570796, 1.570796),
+    "dof_right_knee_04": (-2.70526, 0.0),
+    "dof_right_ankle_02": (-0.261799, 1.134464),  # real high limit is higher
+    "dof_right_shoulder_pitch_03": (-3.490658, 1.047198),
+    "dof_right_shoulder_roll_03": (-1.658063, 0.436332),
+    "dof_right_shoulder_yaw_02": (-1.671886, 1.671886),
+    "dof_right_elbow_02": (0.0, 2.478368),
+    "dof_right_wrist_00": (-1.37881, 1.37881),
+    "dof_left_shoulder_pitch_03": (-1.047198, 3.490658),
+    "dof_left_shoulder_roll_03": (-0.436332, 1.658063),
+    "dof_left_shoulder_yaw_02": (-1.671886, 1.671886),
+    "dof_left_elbow_02": (-2.478368, 0.0),
+    "dof_left_wrist_00": (-1.37881, 1.37881),
+}
+
+assert list(JOINT_BIASES.keys()) == list(JOINT_LIMITS.keys())
 
 
 @dataclass
@@ -61,6 +86,10 @@ class HumanoidWalkingTaskConfig(ksim.PPOConfig):
     var_scale: float = xax.field(
         value=0.5,
         help="The scale for the standard deviations of the actor.",
+    )
+    cutoff_frequency: float = xax.field(
+        value=10.0,
+        help="The cutoff frequency for the low-pass filter.",
     )
     # Optimizer parameters.
     learning_rate: float = xax.field(
@@ -100,7 +129,6 @@ class SingleFootContactReward(ksim.StatefulReward):
     Allows for small grace period when both feet are in contact for less jumpy gaits.
     """
 
-    scale: float = 1.0
     ctrl_dt: float = 0.02
     grace_period: float = 0.2  # seconds
 
@@ -130,8 +158,6 @@ class SingleFootContactReward(ksim.StatefulReward):
 class NoContactPenalty(ksim.Reward):
     """Penalty for having no contact with the ground when walking."""
 
-    scale: float = -0.1
-
     def get_reward(self, traj: ksim.Trajectory) -> Array:
         left_contact = jnp.where(traj.obs["left_foot_touch"] > 0.1, True, False)[:, 0]
         right_contact = jnp.where(traj.obs["right_foot_touch"] > 0.1, True, False)[:, 0]
@@ -143,10 +169,8 @@ class NoContactPenalty(ksim.Reward):
 class FeetAirtimeReward(ksim.StatefulReward):
     """Encourages reasonable step frequency by rewarding long swing phases and penalizing quick stepping."""
 
-    scale: float = 1.0
     ctrl_dt: float = 0.02
     touchdown_penalty: float = 0.4
-    scale_by_curriculum: bool = False
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         airtime_carry = jnp.array([0.0, 0.0])
@@ -207,7 +231,6 @@ class ArmPositionReward(ksim.Reward):
         physics_model: ksim.PhysicsModel,
         scale: float = 0.05,
         error_scale: float = 0.1,
-        scale_by_curriculum: bool = False,
     ) -> Self:
         # Define the arm joint names in order
         joint_names = (
@@ -226,14 +249,13 @@ class ArmPositionReward(ksim.Reward):
         # Map joint names to indices
         joint_to_idx = ksim.get_qpos_data_idxs_by_name(physics_model)
         joint_indices = jnp.array([int(joint_to_idx[name][0]) - 7 for name in joint_names])
-        joint_biases = jnp.array([bias for (name, bias) in JOINT_BIASES if name in joint_names])
+        joint_biases = jnp.array([JOINT_BIASES[name] for name in joint_names])
 
         return cls(
             joint_indices=joint_indices,
             joint_biases=joint_biases,
             error_scale=error_scale,
             scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
         )
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
@@ -398,32 +420,65 @@ class FeetOrientationReward(ksim.Reward):
 
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         base_yaw = xax.quat_to_euler(trajectory.xquat[:, 1, :])[:, 2]
-        straight_foot_euler = jnp.stack(
+        straight_foot_euler = jnp.stack(  # TODO this could be way tighter
             [
-                jnp.full_like(base_yaw, -jnp.pi / 2),
-                jnp.zeros_like(base_yaw),
-                base_yaw - jnp.pi,
+                jnp.stack(
+                    [
+                        jnp.full_like(base_yaw, -jnp.pi / 2),
+                        jnp.zeros_like(base_yaw),
+                        base_yaw - jnp.pi,
+                    ],
+                    axis=-1,
+                ),
+                jnp.stack(
+                    [
+                        jnp.full_like(base_yaw, jnp.pi / 2),  # Flipped sign for right foot
+                        jnp.zeros_like(base_yaw),
+                        base_yaw - jnp.pi,
+                    ],
+                    axis=-1,
+                ),
             ],
-            axis=-1,
+            axis=1,
         )
 
         # compute rpy error
         straight_foot_quat = xax.euler_to_quat(straight_foot_euler)
-        left_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_left_idx, :], axis=-1) ** 2
-        right_quat_error = 1 - jnp.sum(straight_foot_quat * trajectory.xquat[:, self.foot_right_idx, :], axis=-1) ** 2
-        rpy_error = left_quat_error + right_quat_error
+        feet_quat = trajectory.xquat[:, [self.foot_left_idx, self.foot_right_idx], :]
+        rpy_error = jnp.sum((1 - jnp.sum(straight_foot_quat * feet_quat, axis=-1) ** 2), axis=-1)
 
         # compute rp error
         feet_euler = xax.quat_to_euler(trajectory.xquat[:, [self.foot_left_idx, self.foot_right_idx], :])
         feet_quat = xax.euler_to_quat(feet_euler.at[:, :, 2].set(0.0))
 
-        straight_foot_quat = xax.euler_to_quat(straight_foot_euler.at[:, 2].set(0.0))
-        rp_error = (1 - jnp.sum(straight_foot_quat[:, None, :] * feet_quat, axis=-1) ** 2).sum(axis=1)
+        straight_foot_quat = xax.euler_to_quat(straight_foot_euler.at[:, :, 2].set(0.0))
+        rp_error = (1 - jnp.sum(straight_foot_quat * feet_quat, axis=-1) ** 2).sum(axis=1)
 
         # choose rp error or rpy error based on command
         is_rotating = jnp.linalg.norm(trajectory.command["unified_command"][:, 2], axis=-1) > 1e-3
         error = jnp.where(is_rotating, rp_error, rpy_error)
         return jnp.exp(-error / self.error_scale)
+
+
+@attrs.define(frozen=True, kw_only=True)
+class COMDistanceReward(ksim.Reward):
+    """Keep robot COM close to support polygon centroid, ONLY when standing with 2 feet on the ground."""
+
+    error_scale: float = attrs.field(default=0.25)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        is_valid_support = trajectory.obs["com_distance"] >= 0.0
+        reward = jnp.where(
+            is_valid_support,
+            jnp.where(
+                is_zero_cmd,
+                jnp.exp(-trajectory.obs["com_distance"] / self.error_scale),
+                0.0,
+            ),
+            0.0,
+        )
+        return reward
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -442,54 +497,156 @@ class BaseAccelerationReward(ksim.Reward):
         return jnp.exp(-error / self.error_scale)
 
 
-@attrs.define(frozen=True, kw_only=True)
-class JointVelocityPenalty(ksim.Reward):
-    """Penalty for how fast the joint angular velocities are changing."""
+@attrs.define(frozen=True)
+class COMDistanceObservation(ksim.Observation):
+    """Observes the distance between the robot's center of mass (COM) and the centroid of its support polygon.
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos[..., 7:]
-        qpos_zp = jnp.pad(qpos, ((1, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((1, 0),), mode="edge")[..., :-1, None]
-        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        return xax.get_norm(qvel, "l2").mean(axis=-1)
+    The support polygon is formed by the contact points between the robot's feet and the ground.
+    A negative value indicates invalid support (e.g. robot is airborne), while a positive value represents
+    the actual distance between COM and support polygon centroid.
+    """
 
+    @staticmethod
+    def polygon_centroid_masked(poly: Array, mask: Array) -> Array:
+        # poly: Lx2 padded array, mask: L bool for valid vertices (not necessarily contiguous)
+        idxs = jnp.arange(poly.shape[0], dtype=jnp.int32)
+        mask_i32 = mask.astype(jnp.int32)
+        count = jnp.sum(mask_i32)
 
-@attrs.define(frozen=True, kw_only=True)
-class JointAccelerationPenalty(ksim.Reward):
-    """Penalty for high joint accelerations."""
+        # Pack valid vertices to the front using nonzero-gather with static size
+        valid_indices = jnp.nonzero(mask, size=poly.shape[0])[0]
+        packed = poly[valid_indices]
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        qpos = trajectory.qpos[..., 7:]
-        qpos_zp = jnp.pad(qpos, ((2, 0), (0, 0)), mode="edge")
-        done = jnp.pad(trajectory.done, ((2, 0),), mode="edge")[..., :-1, None]
-        qvel = jnp.where(done, 0.0, qpos_zp[..., 1:, :] - qpos_zp[..., :-1, :])
-        qacc = jnp.where(done[..., 1:, :], 0.0, qvel[..., 1:, :] - qvel[..., :-1, :])
-        penalty = xax.get_norm(qacc, "l2").mean(axis=-1)
-        return penalty
+        # Work on packed vertices; first `count` entries are valid
+        next_idxs = jnp.where(idxs + 1 < count, idxs + 1, jnp.int32(0))
+        next_pts = packed[next_idxs]
 
+        # Edge mask: enable first (count-1) edges, plus the closing edge if count>0
+        edge_mask = (idxs < jnp.maximum(count - 1, 0)) | ((idxs == jnp.maximum(count - 1, 0)) & (count > 0))
+        edge_mask_f = edge_mask.astype(packed.dtype)
 
-@attrs.define(frozen=True, kw_only=True)
-class CtrlPenalty(ksim.Reward):
-    """Penalty for large torque commands."""
+        x = packed[:, 0]
+        y = packed[:, 1]
+        x1 = next_pts[:, 0]
+        y1 = next_pts[:, 1]
 
-    scales: tuple[float, ...] | None = attrs.field(default=None)
+        cross = (x * y1 - x1 * y) * edge_mask_f
+        area = 0.5 * jnp.sum(cross)
 
-    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
-        ctrl = trajectory.ctrl
-        if self.scales is not None:
-            ctrl = ctrl / jnp.array(self.scales)
-        return xax.get_norm(ctrl, "l2").mean(axis=-1)
+        # Fallback mean of valid points if area ~ 0 or no valid points
+        first_mask = idxs < jnp.maximum(count, 0)
+        first_mask_f = first_mask.astype(packed.dtype)
+        count_f = jnp.maximum(first_mask_f.sum(), jnp.array(1.0, dtype=packed.dtype))
+        mean_point = jnp.sum(packed * first_mask_f[:, None], axis=0) / count_f
 
-    @classmethod
-    def create(cls, model: ksim.PhysicsModel, scale: float = -1.0, scale_by_curriculum: bool = False) -> Self:
-        ctrl_min = model.actuator_ctrlrange[..., 0]
-        ctrl_max = model.actuator_ctrlrange[..., 1]
-        ctrl_range = (ctrl_max - ctrl_min) / 2.0
-        ctrl_range_list = ctrl_range.flatten().tolist()
-        return cls(
-            scales=tuple(ctrl_range_list),
-            scale=scale,
-            scale_by_curriculum=scale_by_curriculum,
+        cx = jnp.where(jnp.abs(area) < 1e-12, mean_point[0], jnp.sum((x + x1) * cross) / (6.0 * area))
+        cy = jnp.where(jnp.abs(area) < 1e-12, mean_point[1], jnp.sum((y + y1) * cross) / (6.0 * area))
+        return jnp.array([cx, cy])
+
+    @staticmethod
+    def monotone_chain_hull(points: Array) -> tuple[Array, Array, Array]:
+        """points: (N,2) float array.
+
+        returns: hull_idx: (M,) int array of indices into points (M <= N),
+                hull_pts: (M,2) points[hull_idx].
+        """
+        pts = jnp.asarray(points)
+        n = pts.shape[0]
+        if n == 0:
+            return jnp.array([], dtype=jnp.int32), jnp.empty((0, 2), pts.dtype)
+        if n <= 2:
+            idxs = jnp.arange(n, dtype=jnp.int32)
+            return idxs, pts
+
+        # lexicographic sort by x then y
+        order = jnp.lexsort((pts[:, 1], pts[:, 0])).astype(jnp.int32)
+        spts = pts[order]
+
+        def cross(a: Array, b: Array, c: Array) -> Array:
+            return (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0])
+
+        def build(indices: Array) -> tuple[Array, int]:
+            stack = -jnp.ones((indices.shape[0],), dtype=jnp.int32)
+            ptr0 = jnp.int32(0)
+
+            def push(carry: tuple[Array, int], idx: int) -> tuple[tuple[Array, int], None]:
+                stack, ptr = carry
+
+                def cond_fn(carry_inner: tuple[Array, int]) -> bool:
+                    stack_i, ptr_i = carry_inner
+                    # need ptr_i >= 2 and cross <= 0
+                    a_idx = stack_i[ptr_i - 2]
+                    b_idx = stack_i[ptr_i - 1]
+                    # compute cross on sorted points
+                    return (ptr_i >= 2) & (cross(spts[a_idx], spts[b_idx], spts[idx]) <= 0)
+
+                def body_fn(carry_inner: tuple[Array, int]) -> tuple[Array, int]:
+                    stack_i, ptr_i = carry_inner
+                    # pop last
+                    stack_i = stack_i.at[ptr_i - 1].set(-1)
+                    ptr_i = ptr_i - 1
+                    return stack_i, ptr_i
+
+                stack, ptr = jax.lax.while_loop(cond_fn, body_fn, (stack, ptr))
+                stack = stack.at[ptr].set(idx)
+                ptr = ptr + 1
+                return (stack, ptr), None
+
+            (stack_final, ptr_final), _ = jax.lax.scan(push, (stack, ptr0), indices)
+            return stack_final, ptr_final
+
+        sorted_idxs = jnp.arange(spts.shape[0], dtype=jnp.int32)
+
+        # build lower hull on sorted order
+        stack_l, ptr_l = build(sorted_idxs)
+        # build upper hull on reversed order
+        rev_idxs = sorted_idxs[::-1]
+        stack_u, ptr_u = build(rev_idxs)
+
+        # Create fixed-size masks (drop last element of each chain per Andrew's algorithm)
+        n_sorted = spts.shape[0]
+        idxs = jnp.arange(n_sorted, dtype=jnp.int32)
+        lower_len = jnp.maximum(ptr_l - 1, jnp.int32(0))
+        upper_len = jnp.maximum(ptr_u - 1, jnp.int32(0))
+        lower_mask = idxs < lower_len
+        upper_mask = idxs < upper_len
+
+        lower_padded = jnp.where(lower_mask, stack_l, -1)
+        upper_padded = jnp.where(upper_mask, stack_u, -1)
+
+        hull_sorted_positions = jnp.concatenate([lower_padded, upper_padded], axis=0)
+        hull_mask = jnp.concatenate([lower_mask, upper_mask], axis=0)
+
+        # safe gather from order using masked positions
+        safe_positions = jnp.where(hull_mask, hull_sorted_positions, jnp.int32(0))
+        hull_idx = order[safe_positions]
+        hull_pts = pts[hull_idx]
+        return hull_idx, hull_pts, hull_mask
+
+    def observe(self, state: ksim.ObservationInput, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
+        contact = state.physics_state.data.contact
+        floor_contact_mask = contact.geom1 == 0
+        feet_to_floor_contacts = jnp.where(floor_contact_mask[:, None], contact.pos, jnp.zeros_like(contact.pos))
+        base_subtree_com = state.physics_state.data.subtree_com[2]
+
+        # Count unique contacts using a vectorized approach
+        def num_unique(x: Array) -> Array:
+            x = jnp.ravel(contact.geom2)
+            sx = jnp.sort(x)
+            diffs = sx[1:] != sx[:-1]  # booleans where value changes
+            unique_contacts = jnp.where(x.size == 0, 0, jnp.sum(diffs) + 1)
+            return unique_contacts
+
+        def compute_distance(feet_contacts: Array, base_com: Array) -> Array:
+            _, hull_pts, hull_mask = self.monotone_chain_hull(feet_contacts[:, :2])
+            centroid = self.polygon_centroid_masked(hull_pts, hull_mask)
+            return jnp.linalg.norm(centroid - base_com[:2])
+
+        unique_contacts = num_unique(contact.geom2)
+
+        # Only compute hull and distance if we have enough contacts
+        return jax.lax.cond(
+            unique_contacts >= 3, lambda: compute_distance(feet_to_floor_contacts, base_subtree_com), lambda: -1.0
         )
 
 
@@ -558,7 +715,6 @@ class UnifiedCommand(ksim.Command):
     def initial_command(self, physics_data: ksim.PhysicsData, curriculum_level: Array, rng: PRNGKeyArray) -> Array:
         rng_a, rng_b, rng_c, rng_d, rng_e, rng_f, rng_g, rng_h, rng_i = jax.random.split(rng, 9)
 
-        # cmd  = [vx, vy, wz, bh, rx, ry]
         vx = jax.random.uniform(rng_b, (1,), minval=self.vx_range[0], maxval=self.vx_range[1])
         vy = jax.random.uniform(rng_c, (1,), minval=self.vy_range[0], maxval=self.vy_range[1])
         wz = jax.random.uniform(rng_d, (1,), minval=self.wz_range[0], maxval=self.wz_range[1])
@@ -566,16 +722,11 @@ class UnifiedCommand(ksim.Command):
         rx = jax.random.uniform(rng_f, (1,), minval=self.rx_range[0], maxval=self.rx_range[1])
         ry = jax.random.uniform(rng_g, (1,), minval=self.ry_range[0], maxval=self.ry_range[1])
 
-        # 50% chance to sample from wide uniform distribution
-        arms_uni = jax.random.uniform(
+        arms = jax.random.uniform(
             rng_h, (10,), minval=jnp.array(self.arms_range[0]), maxval=jnp.array(self.arms_range[1])
         )
-        # 50% chance to mask out 9/10 arm commands and have only 1 active
-        active_idx = jax.random.randint(rng_i, (), minval=0, maxval=10)
-        mask = jnp.arange(10) == active_idx
-        arms_gau = jax.random.normal(rng_i, (10,)) * 0.5 * mask
-        arms_gau = jnp.clip(arms_gau, min=jnp.array(self.arms_range[0]), max=jnp.array(self.arms_range[1]))
-        arms = jnp.where(jax.random.bernoulli(rng_i), arms_uni, arms_gau)
+        mask = jax.random.bernoulli(rng_h, shape=(10,))
+        arms = arms * mask
 
         _ = jnp.zeros_like(vx)
         __ = jnp.zeros_like(arms)
@@ -695,10 +846,11 @@ class Actor(eqx.Module):
     output_proj: eqx.nn.Linear
     num_inputs: int = eqx.field()
     num_outputs: int = eqx.field()
-    clip_positions: ksim.ClipPositions = eqx.field()
     min_std: float = eqx.field()
     max_std: float = eqx.field()
     var_scale: float = eqx.field()
+    cutoff_frequency: float = eqx.field()
+    ctrl_dt: float = eqx.field()
 
     def __init__(
         self,
@@ -712,6 +864,8 @@ class Actor(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        cutoff_frequency: float,
+        ctrl_dt: float,
     ) -> None:
         # Project input to hidden size
         key, input_proj_key = jax.random.split(key)
@@ -744,14 +898,15 @@ class Actor(eqx.Module):
 
         self.num_inputs = num_inputs
         self.num_outputs = num_outputs
-        self.clip_positions = ksim.ClipPositions.from_physics_model(physics_model)
         self.min_std = min_std
         self.max_std = max_std
         self.var_scale = var_scale
+        self.cutoff_frequency = cutoff_frequency
+        self.ctrl_dt = ctrl_dt
 
     def forward(
-        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...]
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
+        self, obs_n: Array, carry: Array | tuple[tuple[Array, ...], ...], lpf_params: ksim.LowPassFilterParams
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
         x_n = self.input_proj(obs_n)
         out_carries = []
         for i, rnn in enumerate(self.rnns):
@@ -768,13 +923,16 @@ class Actor(eqx.Module):
         std_n = jnp.clip((jax.nn.softplus(std_n) + self.min_std) * self.var_scale, max=self.max_std)
 
         # Apply bias to the means
-        arm_cmd_bias = jnp.concatenate([obs_n[..., -10:], jnp.zeros(shape=(10,))], axis=-1)
-        mean_n = mean_n + jnp.array([v for _, v in JOINT_BIASES]) + arm_cmd_bias
+        arm_cmd_bias = jnp.concatenate([jnp.zeros(shape=(10,)), obs_n[..., -10:]], axis=-1)
+        mean_n = mean_n + jnp.array(list(JOINT_BIASES.values())) + arm_cmd_bias
+
+        # Apply low-pass filter
+        mean_n, lpf_params = ksim.lowpass_one_pole(mean_n, self.ctrl_dt, self.cutoff_frequency, lpf_params)
 
         # Create diagonal gaussian distribution
         dist_n = distrax.MultivariateNormalDiag(loc=mean_n, scale_diag=std_n)
 
-        return dist_n, tuple(out_carries)
+        return dist_n, tuple(out_carries), lpf_params
 
 
 class Critic(eqx.Module):
@@ -857,6 +1015,8 @@ class Model(eqx.Module):
         var_scale: float,
         hidden_size: int,
         depth: int,
+        cutoff_frequency: float,
+        ctrl_dt: float,
     ) -> None:
         actor_key, critic_key = jax.random.split(key)
         self.actor = Actor(
@@ -869,6 +1029,8 @@ class Model(eqx.Module):
             var_scale=var_scale,
             hidden_size=hidden_size,
             depth=depth,
+            cutoff_frequency=cutoff_frequency,
+            ctrl_dt=ctrl_dt,
         )
         self.critic = Critic(
             critic_key,
@@ -883,6 +1045,8 @@ class Carry(TypedDict):
     actor_mirror: tuple[tuple[Array, Array], ...]
     critic: tuple[tuple[Array, Array], ...]
     critic_mirror: tuple[tuple[Array, Array], ...]
+    lpf_params: ksim.LowPassFilterParams
+    lpf_params_mirror: ksim.LowPassFilterParams
 
 
 class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
@@ -907,11 +1071,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             return optax.chain(optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay))
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("kbot-headless", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot", name="robot"))
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("kbot-headless"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -933,28 +1097,29 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "static_friction": ksim.StaticFrictionRandomizer(),
             "armature": ksim.ArmatureRandomizer(),
-            "mass_multiplication": ksim.AllBodiesMassMultiplicationRandomizer(scale_lower=0.75, scale_upper=1.25),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
-            "joint_zero_position": ksim.JointZeroPositionRandomizer(
-                scale_lower=math.radians(-3), scale_upper=math.radians(3)
-            ),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
                 model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
             ),
+            "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
+            "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.15),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
         return {
-            "linear push": ksim.LinearPushEvent(
-                linvel=1.0,
-                vel_range=(0.3, 0.8),
+            "force_push": ksim.ForcePushEvent.from_body_name(
+                model=physics_model,
+                body_name="base",
+                max_force=100.0,
+                max_torque=10.0,
+                duration_range=(0.1, 0.5),
                 interval_range=(3.0, 6.0),
             ),
         }
 
     def get_resets(self, physics_model: ksim.PhysicsModel) -> list[ksim.Reset]:
         return [
-            ksim.RandomJointPositionReset.create(physics_model, {k: v for k, v in JOINT_BIASES}, scale=0.1),
+            ksim.RandomJointPositionReset.create(physics_model, JOINT_BIASES, scale=0.1),
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
@@ -963,10 +1128,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
         return {
-            "joint_position": ksim.JointPositionObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(2))),
-            "joint_velocity": ksim.JointVelocityObservation(
-                noise=ksim.MultiplicativeUniformNoise(mag=math.radians(10))
+            "joint_position": ksim.JointPositionObservation(),
+            "biased_joint_position": ksim.BiasedJointPositionObservation(
+                bias_range=math.radians(3),
+                noise=ksim.AdditiveUniformNoise(mag=math.radians(3)),  # 0.05 rad i think
             ),
+            "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
             "actuator_force": ksim.ActuatorForceObservation(),
             "center_of_mass_inertia": ksim.CenterOfMassInertiaObservation(),
             "center_of_mass_velocity": ksim.CenterOfMassVelocityObservation(),
@@ -997,36 +1164,37 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "feet_position": FeetPositionObservation.create(
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
             ),
             "base_height": BaseHeightObservation(),
             "imu_projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
                 framequat_name="imu_site_quat",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(1)),
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
-                max_lag=0.1,
-                bias=math.radians(2),
+                max_lag=0.75,
+                bias=math.radians(4),  # TODO maybe decrease?
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
-                framequat_name="base_site_quat",
+                framequat_name="imu_site_quat",
             ),
+            "com_distance": COMDistanceObservation(),
         }
 
     def get_commands(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Command]:
-        arm_joint_names = [name for name, _ in JOINT_BIASES[:10]]
+        arm_joint_names = list(JOINT_BIASES.keys())[10:20]
         joint_limits = ksim.get_position_limits(physics_model)
         arm_joint_limits = tuple(zip(*[joint_limits[name] for name in arm_joint_names]))
         return {
             "unified_command": UnifiedCommand(
-                vx_range=(-0.5, 1.5),  # m/s
+                vx_range=(-0.5, 1.2),  # m/s
                 vy_range=(-0.5, 0.5),  # m/s
                 wz_range=(-1.0, 1.0),  # rad/s
                 bh_range=(-0.25, 0.05),  # m
-                rx_range=(-0.3, 0.3),  # rad
-                ry_range=(-0.3, 0.3),  # rad
+                rx_range=(-0.25, 0.25),  # rad
+                ry_range=(-0.25, 0.25),  # rad
                 arms_range=arm_joint_limits,  # rad
                 ctrl_dt=self.config.ctrl_dt,
                 switch_prob=self.config.ctrl_dt / 5,  # once per x seconds
@@ -1038,35 +1206,33 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # cmd
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
-            "roll_pitch": XYOrientationReward(scale=0.1, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(
+            "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
+            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.99,
+                standard_height=0.73,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
-            "no_contact_p": NoContactPenalty(scale=-0.1),
+            "no_contact_p": NoContactPenalty(scale=0.1),
             "feet_airtime": FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
             "feet_orient": FeetOrientationReward.create(
                 physics_model=physics_model,
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.1,
                 error_scale=0.02,
             ),
+            "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            "action_vel": ksim.ActionVelocityPenalty(scale=-0.05),
-            "joint_vel": JointVelocityPenalty(scale=-0.05),
-            "joint_accel": JointAccelerationPenalty(scale=-0.05),
-            "ctrl": CtrlPenalty(scale=-0.00001),
+            "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
@@ -1074,10 +1240,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "bad_z": TerrainBadZTermination.create(
                 physics_model=physics_model,
                 base_body_name="base",
-                foot_left_body_name="KB_D_501L_L_LEG_FOOT",
-                foot_right_body_name="KB_D_501R_R_LEG_FOOT",
-                unhealthy_z_lower=0.6,
-                unhealthy_z_upper=1.2,
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
+                unhealthy_z_lower=0.35,  # for base origin
+                unhealthy_z_upper=0.95,
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
@@ -1104,14 +1270,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         num_actor_inputs = (
             num_joints * 2  # joint pos and vel
-            + 3  # projected gravity
+            + 5  # projected gravity
             + 3  # imu_gyro
             + num_commands
         )
 
         num_critic_inputs = (
             num_joints * 2  # joint pos and vel
-            + 3  # projected gravity
+            + 5  # projected gravity
             + 3  # imu gyro
             + num_commands
             + 2  # feet touch
@@ -1137,7 +1303,30 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             var_scale=self.config.var_scale,
             hidden_size=self.config.hidden_size,
             depth=self.config.depth,
+            cutoff_frequency=self.config.cutoff_frequency,
+            ctrl_dt=self.config.ctrl_dt,
+        )
 
+    def normalize_joint_pos(self, joint_pos: Array) -> Array:
+        joint_biases = jnp.array(list(JOINT_BIASES.values()))
+        joint_min, joint_max = jnp.array(list(JOINT_LIMITS.values())).T
+        max_joint_range = jnp.maximum(joint_biases - joint_min, joint_max - joint_biases)
+        return (joint_pos - joint_biases) / max_joint_range
+
+    def normalize_joint_vel(self, joint_vel: Array) -> Array:
+        return joint_vel / 10.0
+
+    def encode_projected_gravity(self, projected_gravity: Array) -> Array:
+        roll = jnp.arctan2(projected_gravity[1], -projected_gravity[2])
+        pitch = jnp.arctan2(-projected_gravity[0], jnp.sqrt(projected_gravity[1] ** 2 + projected_gravity[2] ** 2))
+        projected_gravity_unit = projected_gravity / jnp.linalg.norm(projected_gravity, axis=-1, keepdims=True)
+        return jnp.concatenate(
+            [
+                roll[..., None],
+                pitch[..., None],
+                projected_gravity_unit,
+            ],
+            axis=-1,
         )
 
     def run_actor(
@@ -1146,8 +1335,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         observations: xax.FrozenDict[str, Array],
         commands: xax.FrozenDict[str, Array],
         carry: tuple[tuple[Array, ...], ...],
-    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...]]:
-        joint_pos_n = observations["noisy_joint_position"]
+        lpf_params: ksim.LowPassFilterParams,
+    ) -> tuple[distrax.Distribution, tuple[tuple[Array, ...], ...], ksim.LowPassFilterParams]:
+        # joint_pos_n = observations["noisy_joint_position"]
+        joint_pos_n = observations["noisy_biased_joint_position"]
         joint_vel_n = observations["noisy_joint_velocity"]
         projected_gravity_3 = observations["noisy_imu_projected_gravity"]
         imu_gyro_3 = observations["noisy_imu_gyro"]
@@ -1155,18 +1346,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         zero_cmd = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
 
         obs = [
-            joint_pos_n,  # NUM_JOINTS
-            joint_vel_n,  # NUM_JOINTS
-            projected_gravity_3,  # 3
+            self.normalize_joint_pos(joint_pos_n),  # NUM_JOINTS
+            self.normalize_joint_vel(joint_vel_n),  # NUM_JOINTS
+            self.encode_projected_gravity(projected_gravity_3),  # 5
             imu_gyro_3,  # 3
             zero_cmd,  # 1
             cmd,  # 16
         ]
 
         obs_n = jnp.concatenate(obs, axis=-1)
-        action, carry = model.forward(obs_n, carry)
+        action, carry, lpf_params = model.forward(obs_n, carry, lpf_params)
 
-        return action, carry
+        return action, carry, lpf_params
 
     def run_critic(
         self,
@@ -1198,9 +1389,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         obs_n = jnp.concatenate(
             [
                 # actor obs:
-                qpos_n,
-                qvel_n / 10.0,
-                projected_gravity_3,
+                self.normalize_joint_pos(qpos_n),
+                self.normalize_joint_vel(qvel_n),
+                self.encode_projected_gravity(projected_gravity_3),
                 imu_gyro_3,
                 zero_cmd,
                 cmd,
@@ -1230,16 +1421,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
     ) -> tuple[Carry, ksim.PPOVariables]:
         transition, rng = xs
 
-        actor_c = carry["actor"]
-        critic_c = carry["critic"]
-        actor_c_m = carry["actor_mirror"]
-        critic_c_m = carry["critic_mirror"]
-
-        actor_dist, next_actor_c = self.run_actor(
+        actor_dist, next_actor_c, next_lpf_params = self.run_actor(
             model=model.actor,
             observations=transition.obs,
             commands=transition.command,
-            carry=actor_c,
+            carry=carry["actor"],
+            lpf_params=carry["lpf_params"],
         )
 
         # Gets the log probabilities of the action.
@@ -1250,15 +1437,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             model=model.critic,
             observations=transition.obs,
             commands=transition.command,
-            carry=critic_c,
+            carry=carry["critic"],
         )
 
         # compute mirror losses
-        mirrored_actor_dist, next_actor_c_m = self.run_actor(
+        mirrored_actor_dist, next_actor_c_m, next_lpf_params_m = self.run_actor(
             model=model.actor,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
-            carry=actor_c_m,
+            carry=carry["actor_mirror"],
+            lpf_params=carry["lpf_params_mirror"],
         )
         double_mirrored_actor_dist = self.mirror_joints(mirrored_actor_dist.mean())
         action_mirror_loss = (
@@ -1269,7 +1457,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             model=model.critic,
             observations=self.mirror_obs(transition.obs),
             commands=self.mirror_cmd(transition.command),
-            carry=critic_c_m,
+            carry=carry["critic_mirror"],
         )
         value_mirror_loss = jnp.mean((value - mirrored_value) ** 2) * self.config.critic_mirror_loss_scale
 
@@ -1277,6 +1465,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             log_probs=jnp.expand_dims(log_probs, axis=0),
             values=value.squeeze(-1),
             entropy=jnp.expand_dims(actor_dist.entropy(), axis=0),
+            action_std=actor_dist.stddev(),
             aux_losses={
                 "action_mirror_loss": action_mirror_loss,
                 "value_mirror_loss": value_mirror_loss,
@@ -1288,6 +1477,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "critic": next_critic_c,
             "actor_mirror": next_actor_c_m,
             "critic_mirror": next_critic_c_m,
+            "lpf_params": next_lpf_params,
+            "lpf_params_mirror": next_lpf_params_m,
         }
         next_carry = jax.tree.map(
             lambda x, y: jnp.where(transition.done, x, y),
@@ -1318,13 +1509,19 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         model: Model,
         rng: PRNGKeyArray,
     ) -> Carry:
-        return Carry(**{  # type: ignore[typeddict-item]
-            name: tuple(
-                (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
-                for _ in range(self.config.depth)
-            )
-            for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
-        })
+        return Carry(
+            **{
+                **{
+                    name: tuple(
+                        (jnp.zeros(shape=(self.config.hidden_size)), jnp.zeros(shape=(self.config.hidden_size)))
+                        for _ in range(self.config.depth)
+                    )
+                    for name in ["actor", "actor_mirror", "critic", "critic_mirror"]
+                },
+                "lpf_params": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
+                "lpf_params_mirror": ksim.LowPassFilterParams.initialize(len(JOINT_BIASES)),
+            }
+        )
 
     def sample_action(
         self,
@@ -1334,15 +1531,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         physics_state: ksim.PhysicsState,
         observations: xax.FrozenDict[str, PyTree],
         commands: xax.FrozenDict[str, PyTree],
-        # curriculum_level: Array,
+        curriculum_level: Array,
         rng: PRNGKeyArray,
         argmax: bool,
     ) -> ksim.Action:
-        action_dist_j, actor_carry = self.run_actor(
+        action_dist_j, actor_carry, next_lpf_params = self.run_actor(
             model=model.actor,
             observations=observations,
             commands=commands,
             carry=model_carry["actor"],
+            lpf_params=model_carry["lpf_params"],
         )
         action_j = action_dist_j.mode() if argmax else action_dist_j.sample(seed=rng)
         return ksim.Action(
@@ -1350,33 +1548,23 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             carry={
                 **model_carry,
                 "actor": actor_carry,
+                "lpf_params": next_lpf_params,
             },
         )
 
     def mirror_joints(self, j: Array) -> Array:
         assert j.shape[0] == 20, "Joints must be 20-dimensional"
-        j_m = jnp.zeros_like(j)
 
-        # Arms (first 10 joints)
-        # Mirror right arm (0-4) to left arm positions (5-9)
-        j_m = j_m.at[0:5].set(j[5:10])
-        # Mirror left arm (5-9) to right arm positions (0-4)
-        j_m = j_m.at[5:10].set(j[0:5])
+        left_leg = j[0:5]
+        right_leg = j[5:10]
+        right_arm = j[10:15]
+        left_arm = j[15:20]
 
-        # Legs (next 10 joints)
-        # Mirror right leg (10-14) to left leg positions (15-19)
-        j_m = j_m.at[10:15].set(j[15:20])
-        # Mirror left leg (15-19) to right leg positions (10-14)
-        j_m = j_m.at[15:20].set(j[10:15])
-
-        # Negate every joint angle
-        j_m = -j_m
-
-        return j_m
+        return -jnp.concatenate([right_leg, left_leg, right_arm, left_arm], axis=-1)
 
     def mirror_obs(self, obs: xax.FrozenDict[str, Array]) -> xax.FrozenDict[str, Array]:
         # actor obs
-        noisy_joint_pos_m = self.mirror_joints(obs["noisy_joint_position"])
+        noisy_joint_pos_m = self.mirror_joints(obs["noisy_biased_joint_position"])
         noisy_joint_vel_m = self.mirror_joints(obs["noisy_joint_velocity"])
         noisy_imu_gyro_m = jnp.concatenate(
             [
@@ -1388,9 +1576,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         noisy_imu_projected_gravity_m = jnp.concatenate(
             [
-                -obs["noisy_imu_projected_gravity"][..., 0:1],
-                obs["noisy_imu_projected_gravity"][..., 1:2],
-                -obs["noisy_imu_projected_gravity"][..., 2:3],
+                obs["noisy_imu_projected_gravity"][..., 0:1],
+                -obs["noisy_imu_projected_gravity"][..., 1:2],
+                obs["noisy_imu_projected_gravity"][..., 2:3],
             ],
             axis=-1,
         )
@@ -1408,9 +1596,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         )
         projected_gravity_m = jnp.concatenate(
             [
-                -obs["projected_gravity"][..., 0:1],
-                obs["projected_gravity"][..., 1:2],
-                -obs["projected_gravity"][..., 2:3],
+                obs["projected_gravity"][..., 0:1],
+                -obs["projected_gravity"][..., 1:2],
+                obs["projected_gravity"][..., 2:3],
             ],
             axis=-1,
         )
@@ -1503,7 +1691,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
         return xax.FrozenDict(
             {
-                "noisy_joint_position": noisy_joint_pos_m,
+                "noisy_biased_joint_position": noisy_joint_pos_m,
                 "noisy_joint_velocity": noisy_joint_vel_m,
                 "noisy_imu_gyro": noisy_imu_gyro_m,
                 "noisy_imu_projected_gravity": noisy_imu_projected_gravity_m,
@@ -1531,18 +1719,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             [
                 cmd_u[..., :1],  # x
                 -cmd_u[..., 1:2],  # y
-                -cmd_u[..., 2:3],  # z
+                -cmd_u[..., 2:3],  # wz
                 cmd_u[..., 3:4],  # base height
                 -cmd_u[..., 4:5],  # base roll
                 cmd_u[..., 5:6],  # base pitch
                 self.mirror_joints(
                     jnp.concatenate(
                         [
-                            cmd_u[..., 6:16],
                             jnp.zeros(shape=(10,)),
+                            cmd_u[..., 6:16],
                         ]
                     )
-                )[..., :10],  # arms
+                )[..., 10:20],  # arms
             ],
             axis=-1,
         )
@@ -1557,15 +1745,15 @@ if __name__ == "__main__":
             batch_size=512,
             num_passes=3,
             rollout_length_seconds=2.0,
-            entropy_coef=0.002,
+            entropy_coef=0.004,
             learning_rate=5e-4,
-            gamma=0.9,
+            gamma=0.94,
             lam=0.94,
-            actor_mirror_loss_scale=1.0,
-            critic_mirror_loss_scale=0.01,
+            actor_mirror_loss_scale=0.0,
+            critic_mirror_loss_scale=0.0,
             hidden_size=256,
             # Simulation parameters.
-            dt=0.002,
+            dt=0.004,
             ctrl_dt=0.02,
             iterations=8,
             ls_iterations=8,
@@ -1574,6 +1762,7 @@ if __name__ == "__main__":
             drop_action_prob=0.05,  # Drop 5% of commands.
             # Visualization parameters.
             render_track_body_id=0,
+            # render_full_every_n_seconds=0,
             render_length_seconds=10,
             max_values_per_plot=50,
             # Checkpointing parameters.

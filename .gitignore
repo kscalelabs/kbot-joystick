@@ -26,3 +26,5 @@ dist/
 *.so
 out*/
 **/run_*/
+
+.cache/
