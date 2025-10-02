@@ -1214,7 +1214,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.73,
+                standard_height=0.78,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
@@ -1242,8 +1242,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.35,  # for base origin
-                unhealthy_z_upper=0.95,
+                unhealthy_z_lower=0.4,  # for base origin
+                unhealthy_z_upper=1.0,
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
