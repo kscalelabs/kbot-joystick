@@ -817,8 +817,7 @@ class TerrainBadZTermination(ksim.Termination):
     base_idx: int = attrs.field()
     foot_left_idx: int = attrs.field()
     foot_right_idx: int = attrs.field()
-    unhealthy_z_lower: float = attrs.field()
-    unhealthy_z_upper: float = attrs.field()
+    unhealthy_z: float = attrs.field()
 
     @classmethod
     def create(
@@ -828,8 +827,7 @@ class TerrainBadZTermination(ksim.Termination):
         base_body_name: str,
         foot_left_body_name: str,
         foot_right_body_name: str,
-        unhealthy_z_lower: float,
-        unhealthy_z_upper: float,
+        unhealthy_z: float,
     ) -> Self:
         base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
         fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
@@ -838,8 +836,7 @@ class TerrainBadZTermination(ksim.Termination):
             base_idx=base,
             foot_left_idx=fl,
             foot_right_idx=fr,
-            unhealthy_z_lower=unhealthy_z_lower,
-            unhealthy_z_upper=unhealthy_z_upper,
+            unhealthy_z=unhealthy_z,
         )
 
     def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
@@ -848,7 +845,7 @@ class TerrainBadZTermination(ksim.Termination):
         right_foot_z = state.xpos[self.foot_right_idx, 2]
         lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
         height = base_z - lowest_foot_z
-        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+        return jnp.where((height < self.unhealthy_z), -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1276,8 +1273,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.35,  # for base origin
-                unhealthy_z_upper=0.95,
+                unhealthy_z=0.35,  # for base body origin
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
