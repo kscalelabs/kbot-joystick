@@ -1144,7 +1144,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_force=100.0,
                 max_torque=10.0,
                 duration_range=(0.1, 0.5),
-                interval_range=(3.0, 6.0),
+                interval_range=(0.0, 6.0),
             ),
         }
 
