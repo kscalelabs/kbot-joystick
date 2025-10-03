@@ -95,7 +95,7 @@
                   <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 0.038000 -0.030886 0.056821 0.038000 -0.030886" size="0.020000 0.104686" material="torso_material" class="visual" />
                   <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 0.038000 0.000954 0.056821 0.038000 0.000954" size="0.020000 0.104686" material="collision_material" class="collision" />
                   <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 0.038000 0.000954 0.056821 0.038000 0.000954" size="0.020000 0.104686" material="torso_material" class="visual" />
-                  <site name="left_foot" size="0.105 0.02 0.036" pos="-0.0283 0.038 -0.014" type="box" />
+                  <site name="left_foot" size="0.108 0.022 0.038" pos="-0.0290 0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
@@ -125,7 +125,7 @@
                   <geom name="RFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 -0.038000 -0.030886 0.056821 -0.038000 -0.030886" size="0.020000 0.105464" material="torso_material" class="visual" />
                   <geom name="RFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="collision_material" class="collision" />
                   <geom name="RFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="torso_material" class="visual" />
-                  <site name="right_foot" size="0.105 0.02 0.036" pos="-0.0283 -0.038 -0.014" type="box" />
+                  <site name="right_foot" size="0.108 0.022 0.038" pos="-0.0290 -0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
@@ -187,7 +187,7 @@
           <site name="imu_site" quat="1.0 0.0 0.0 0.0" pos="0.0 0.0 0.0" />
         </body>
       </body>
-      <site name="base_site" pos="0.00000000 0.01000000 0.00000000" quat="1 0 0 0" />
+      <site name="base_site" pos="0.00000000 0.00000000 0.00000000" quat="1 0 0 0" />
       <camera name="front_camera" mode="track" fovy="90.0" quat="4.329780281177467e-17 4.329780281177466e-17 0.7071067811865475 0.7071067811865476" pos="0.0 2.0 0.5" />
       <camera name="side_camera" mode="track" fovy="90.0" quat="-0.5 -0.4999999999999999 0.5 0.5000000000000001" pos="-2.0 0.0 0.5" />
     </body>
