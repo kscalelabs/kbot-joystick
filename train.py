@@ -174,7 +174,7 @@ class FeetAirtimeReward(ksim.StatefulReward):
 
     def initial_carry(self, rng: PRNGKeyArray) -> PyTree:
         airtime_carry = jnp.array([0.0, 0.0])
-        contact_carry = jnp.array([False, False])
+        contact_carry = jnp.array([True, True])
         return airtime_carry, contact_carry
 
     def _compute_airtime(self, initial_airtime: Array, contact_bool: Array, done: Array) -> tuple[Array, Array]:
@@ -783,8 +783,7 @@ class TerrainBadZTermination(ksim.Termination):
     base_idx: int = attrs.field()
     foot_left_idx: int = attrs.field()
     foot_right_idx: int = attrs.field()
-    unhealthy_z_lower: float = attrs.field()
-    unhealthy_z_upper: float = attrs.field()
+    unhealthy_z: float = attrs.field()
 
     @classmethod
     def create(
@@ -794,8 +793,7 @@ class TerrainBadZTermination(ksim.Termination):
         base_body_name: str,
         foot_left_body_name: str,
         foot_right_body_name: str,
-        unhealthy_z_lower: float,
-        unhealthy_z_upper: float,
+        unhealthy_z: float,
     ) -> Self:
         base = ksim.get_body_data_idx_from_name(physics_model, base_body_name)
         fl = ksim.get_body_data_idx_from_name(physics_model, foot_left_body_name)
@@ -804,8 +802,7 @@ class TerrainBadZTermination(ksim.Termination):
             base_idx=base,
             foot_left_idx=fl,
             foot_right_idx=fr,
-            unhealthy_z_lower=unhealthy_z_lower,
-            unhealthy_z_upper=unhealthy_z_upper,
+            unhealthy_z=unhealthy_z,
         )
 
     def __call__(self, state: ksim.PhysicsData, curriculum_level: Array) -> Array:
@@ -814,7 +811,7 @@ class TerrainBadZTermination(ksim.Termination):
         right_foot_z = state.xpos[self.foot_right_idx, 2]
         lowest_foot_z = jnp.minimum(left_foot_z, right_foot_z)
         height = base_z - lowest_foot_z
-        return jnp.where((height < self.unhealthy_z_lower) | (height > self.unhealthy_z_upper), -1, 0)
+        return jnp.where((height < self.unhealthy_z), -1, 0)
 
 
 @attrs.define(frozen=True, kw_only=True)
@@ -1113,7 +1110,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 max_force=100.0,
                 max_torque=10.0,
                 duration_range=(0.1, 0.5),
-                interval_range=(3.0, 6.0),
+                interval_range=(0.0, 6.0),
             ),
         }
 
@@ -1155,12 +1152,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "right_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="right_foot_touch"
             ),
-            "base_site_linvel": ksim.SensorObservation.create(
-                physics_model=physics_model, sensor_name="base_site_linvel"
-            ),
-            "base_site_angvel": ksim.SensorObservation.create(
-                physics_model=physics_model, sensor_name="base_site_angvel"
-            ),
             "feet_position": FeetPositionObservation.create(
                 physics_model=physics_model,
                 base_body_name="base",
@@ -1173,8 +1164,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 framequat_name="imu_site_quat",
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
-                max_lag=0.75,
-                bias=math.radians(4),  # TODO maybe decrease?
+                max_lag=0.75, # 0.75 is effectively 3 timesteps so 60ms
+                bias=math.radians(4),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
@@ -1242,8 +1233,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
-                unhealthy_z_lower=0.4,  # for base origin
-                unhealthy_z_upper=1.0,
+                unhealthy_z=0.4,  # for base body origin
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
             "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
