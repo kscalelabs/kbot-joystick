@@ -81,17 +81,17 @@
               <geom name="KD_D_301L_L_Femur_Lower_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_301L_L_Femur_Lower_Drive.stl" class="visual" />
               <body name="KD_D_401L_L_Shin_Drive" pos="-0.021000 0.021000 -0.212000" quat="0.5000001633974483 0.4999999999999733 0.49999983660255165 0.4999999999999733">
                 <joint name="dof_left_knee_04" type="hinge" ref="0.0" class="robstride_04" range="0 2.705260" axis="0 0 1" />
-                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" />
+                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" /> 
                 <geom name="KD_D_401L_L_Shin_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="KD_D_401L_L_Shin_Drive.stl" class="visual" />
                 <body name="LFootBushing_GPF_1517_12" pos="-0.030000 -0.290000 0.000950" quat="-1.7320510330969933e-07 0.999999999999985 0.0 -0.0">
                   <joint name="dof_left_ankle_02" type="hinge" ref="0.0" class="robstride_02" range="-1.134464 0.261799" axis="0 0 -1" />
                   <inertial pos="-0.016549 0.031142 -0.012943" quat="1.0 0.0 0.0 0.0" mass="0.608966" diaginertia="0.000377 0.00194 0.001893" />
                   <geom name="LFootBushing_GPF_1517_12_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="LFootBushing_GPF_1517_12.stl" class="visual" />
-                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104813" material="collision_material" class="collision" />
-                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.107970 0.038000 -0.030814 0.056360 0.038000 -0.030814" size="0.020000 0.104813" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113266 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104813" material="collision_material" class="collision" />
-                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.113266 0.038000 0.000954 0.056360 0.038000 0.000954" size="0.020000 0.104813" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <site name="left_foot" size="0.105 0.02 0.036" pos="-0.0283 0.038 -0.014" type="box" />
+                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 0.038000 -0.030886 0.056821 0.038000 -0.030886" size="0.020000 0.104813" material="collision_material" class="collision" />
+                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 0.038000 -0.030886 0.056821 0.038000 -0.030886" size="0.020000 0.104813" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 0.038000 0.000954 0.056821 0.038000 0.000954" size="0.020000 0.104813" material="collision_material" class="collision" />
+                  <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 0.038000 0.000954 0.056821 0.038000 0.000954" size="0.020000 0.104813" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <site name="left_foot" size="0.108 0.022 0.038" pos="-0.0290 0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
@@ -117,11 +117,11 @@
                   <joint name="dof_right_ankle_02" type="hinge" ref="0.0" class="robstride_02" range="-0.261799 1.134464" axis="0 0 -1" />
                   <inertial pos="-0.016546 -0.031136 -0.012942" quat="1.0 0.0 0.0 0.0" mass="0.608742" diaginertia="0.000377 0.001939 0.001892" />
                   <geom name="RFootBushing_GPF_1517_12_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="KD_B_102B_TORSO_BTM_material" type="mesh" mesh="RFootBushing_GPF_1517_12.stl" class="visual" />
-                  <geom name="RFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.102246 -0.038000 -0.030735 0.056821 -0.038000 -0.030735" size="0.020000 0.105464" material="collision_material" class="collision" />
-                  <geom name="RFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.102246 -0.038000 -0.030735 0.056821 -0.038000 -0.030735" size="0.020000 0.105464" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <geom name="RFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.114107 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="collision_material" class="collision" />
-                  <geom name="RFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.114107 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="KD_B_102B_TORSO_BTM_material" class="visual" />
-                  <site name="right_foot" size="0.105 0.02 0.036" pos="-0.0283 -0.038 -0.014" type="box" />
+                  <geom name="RFootBushing_GPF_1517_12_collision_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 -0.038000 -0.030886 0.056821 -0.038000 -0.030886" size="0.020000 0.105464" material="collision_material" class="collision" />
+                  <geom name="RFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1037 -0.038000 -0.030886 0.056821 -0.038000 -0.030886" size="0.020000 0.105464" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <geom name="RFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="collision_material" class="collision" />
+                  <geom name="RFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1147 -0.038000 0.000954 0.056821 -0.038000 0.000954" size="0.020000 0.105464" material="KD_B_102B_TORSO_BTM_material" class="visual" />
+                  <site name="right_foot" size="0.108 0.022 0.038" pos="-0.0290 -0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
