@@ -769,8 +769,8 @@ class UnifiedCommand(ksim.Command):
         forward_cmd = jnp.concatenate([vx, _, _, _, _, _, __])
         sideways_cmd = jnp.concatenate([_, vy, _, _, _, _, __])
         rotate_cmd = jnp.concatenate([_, _, wz, _, _, _, __])
-        omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms])
-        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
+        omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms]) # make loc cmd dynamic
+        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms]) # expand and add dynamic -- bh needs expanding -- dynamic necessary for teleop.
         stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
@@ -1185,12 +1185,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "right_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="right_foot_touch"
-            ),
-            "base_site_linvel": ksim.SensorObservation.create(
-                physics_model=physics_model, sensor_name="base_site_linvel"
-            ),
-            "base_site_angvel": ksim.SensorObservation.create(
-                physics_model=physics_model, sensor_name="base_site_angvel"
             ),
             "feet_position": FeetPositionObservation.create(
                 physics_model=physics_model,
