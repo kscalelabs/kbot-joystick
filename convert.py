@@ -55,13 +55,13 @@ def main() -> None:
         "rshoulderpitch",
         "rshoulderroll",
         "rshoulderyaw", 
-        "relbow",
-        "rwrist",
+        "relbowpitch",
+        "rwristroll",
         "lshoulderpitch",
         "lshoulderroll",
         "lshoulderyaw",
-        "lelbow", 
-        "lwrist",
+        "lelbowpitch", 
+        "lwristroll",
     ] # len 16
 
     metadata = PyModelMetadata(
