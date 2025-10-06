@@ -45,9 +45,28 @@ def main() -> None:
     hidden_size = task.config.hidden_size
     carry_shape = (depth, 2, hidden_size)
 
+    command_names = [
+        "xvel",
+        "yvel",
+        "yawrate",
+        "baseheight",
+        "baseroll",
+        "basepitch",
+        "rshoulderpitch",
+        "rshoulderroll",
+        "rshoulderyaw", 
+        "relbowpitch",
+        "rwristroll",
+        "lshoulderpitch",
+        "lshoulderroll",
+        "lshoulderyaw",
+        "lelbowpitch", 
+        "lwristroll",
+    ] # len 16
+
     metadata = PyModelMetadata(
         joint_names=joint_names,
-        num_commands=16,
+        command_names=command_names,
         carry_size=(depth * 2 * hidden_size + len(joint_names),),
     )
 
