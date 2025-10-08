@@ -1130,7 +1130,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "armature": ksim.ArmatureRandomizer(),
             "joint_damping": ksim.JointDampingRandomizer(scale_lower=0.5, scale_upper=2.5),
             "floor_friction": ksim.FloorFrictionRandomizer.from_geom_name(
-                model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=1.5
+                model=physics_model, floor_geom_name="floor", scale_lower=0.5, scale_upper=2.5
             ),
             "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
             "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.15),
@@ -1161,7 +1161,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return {
             "joint_position": ksim.JointPositionObservation(),
             "biased_joint_position": ksim.BiasedJointPositionObservation(
-                bias_range=math.radians(3),
+                bias_range=math.radians(2),
                 noise=ksim.AdditiveUniformNoise(mag=math.radians(3)),  # 0.05 rad i think
             ),
             "joint_velocity": ksim.JointVelocityObservation(noise=ksim.AdditiveUniformNoise(mag=math.radians(15))),
@@ -1178,7 +1178,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "imu_gyro": ksim.SensorObservation.create(
                 physics_model=physics_model,
                 sensor_name="imu_gyro",
-                noise=ksim.AdditiveGaussianNoise(std=math.radians(10)),
+                noise=ksim.AdditiveGaussianNoise(std=math.radians(5)),
             ),
             "left_foot_touch": ksim.SensorObservation.create(
                 physics_model=physics_model, sensor_name="left_foot_touch"
@@ -1199,7 +1199,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
                 max_lag=0.75, # 0.75 is effectively 3 timesteps so 60ms
-                bias=math.radians(4),
+                bias=math.radians(2),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
                 physics_model=physics_model,
