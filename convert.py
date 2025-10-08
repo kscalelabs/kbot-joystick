@@ -38,7 +38,12 @@ def main() -> None:
     init_params = ksim.InitParams(key=jax.random.PRNGKey(0), physics_model=mujoco_model)
     model = cast(Model, task.load_ckpt(ckpt_path, init_params=init_params, part="model")[0])
 
-    joint_names = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
+    joint_names_policy = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
+    joint_names_passthrough = [
+        "dof_right_wrist_gripper_05", 
+        "dof_left_wrist_gripper_05",
+    ]
+    joint_names = joint_names_policy + joint_names_passthrough
 
     # Constant values.
     depth = task.config.depth
@@ -60,19 +65,22 @@ def main() -> None:
         "lshoulderpitch",
         "lshoulderroll",
         "lshoulderyaw",
-        "lelbowpitch", 
+        "lelbowpitch",
         "lwristroll",
-    ] # len 16
+        # cmds that are passed through directly:
+        "rgripper",
+        "lgripper",
+    ] # len 16 + 2
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
         command_names=command_names,
-        carry_size=(depth * 2 * hidden_size + len(joint_names),),
+        carry_size=(depth * 2 * hidden_size + len(joint_names_policy),),
     )
 
     init_carry = Carry(
         actor_carry=jnp.zeros(carry_shape),
-        lpf_params=ksim.LowPassFilterParams.initialize(num_joints=len(joint_names)),
+        lpf_params=ksim.LowPassFilterParams.initialize(num_joints=len(joint_names_policy)),
     )
     flat, unravel = ravel_pytree(init_carry)
 
@@ -89,19 +97,18 @@ def main() -> None:
         command: Array,
         carry: Array,
     ) -> tuple[Array, Array]:
-        # pad command to 16 regardless of num_commands
-        cmd = jnp.pad(command, (0, 16 - command.shape[-1]), mode="constant", constant_values=0)[..., :16]
-
-        cmd_zero = (jnp.linalg.norm(cmd[..., :3], axis=-1) < 1e-3)[..., None]
+        cmd_policy = command[:16]
+        cmd_passthrough = command[16:]
+        cmd_zero = (jnp.linalg.norm(command[..., :3], axis=-1) < 1e-3)[..., None]
 
         obs = jnp.concatenate(
             [
-                task.normalize_joint_pos(joint_angles),
-                task.normalize_joint_vel(joint_angular_velocities),
+                task.normalize_joint_pos(joint_angles[:len(joint_names_policy)]),
+                task.normalize_joint_vel(joint_angular_velocities[:len(joint_names_policy)]),
                 task.encode_projected_gravity(projected_gravity),
                 gyroscope,
                 cmd_zero,
-                cmd,
+                cmd_policy,
             ],
             axis=-1,
         )
@@ -113,14 +120,13 @@ def main() -> None:
             carry=carry_pt.actor_carry,
             lpf_params=carry_pt.lpf_params,
         )
+        action = jnp.concatenate([dist.mode(), cmd_passthrough])
 
         # Flattens the new carry.
-        new_carry_pt = Carry(
-            actor_carry=new_carry,
-            lpf_params=lpf_params,
-        )
+        new_carry_pt = Carry(actor_carry=new_carry, lpf_params=lpf_params)
         new_carry_flat, _ = ravel_pytree(new_carry_pt)
-        return dist.mode(), new_carry_flat
+        
+        return action, new_carry_flat
 
     init_onnx = export_fn(
         model=init_fn,
