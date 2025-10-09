@@ -420,8 +420,9 @@ class TerrainBaseHeightReward(ksim.Reward):
         height_diff = current_height - commanded_height
 
         # for walking: only care about minimum height.
-        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        height_error = jnp.where(is_zero_cmd, jnp.abs(height_diff), jnp.abs(jnp.minimum(height_diff, 0.0)))
+        # is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        # height_error = jnp.where(is_zero_cmd, jnp.abs(height_diff), jnp.abs(jnp.minimum(height_diff, 0.0)))
+        height_error = jnp.abs(height_diff)
         return jnp.exp(-height_error / self.error_scale)
 
 
@@ -1141,7 +1142,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "force_push": ksim.ForcePushEvent.from_body_name(
                 model=physics_model,
                 body_name="base",
-                max_force=100.0,
+                max_force=200.0,
                 max_torque=10.0,
                 duration_range=(0.1, 0.5),
                 interval_range=(0.0, 6.0),
@@ -1254,10 +1255,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.1,
                 error_scale=0.02,
             ),
-            "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
+            # "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
+            # "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
