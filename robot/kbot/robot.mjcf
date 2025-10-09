@@ -145,7 +145,7 @@
                 <geom name="KC_C_401R_R_UpForearmDrive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="KC_C_401R_R_UpForearmDrive.stl" class="visual" />
                 <body name="PRT0001" pos="0.017350 0.103000 0.018000" quat="0.5000001633974483 -0.4999999999999733 0.4999999999999733 0.49999983660255165">
                   <joint name="dof_right_wrist_00" type="hinge" ref="0.0" class="robstride_00" range="-1.378810 1.378810" axis="0 0 -1" />
-                  <inertial pos="0.000339 0.000063 0.027268" quat="1.0 0.0 0.0 0.0" mass="0.469028" diaginertia="0.000279 0.00027 0.000412" />
+                  <inertial pos="0.000141 -0.000442 0.065753" quat="1.0 0.0 0.0 0.0" mass="1.118293" diaginertia="0.002505 0.002028 0.001185" />
                   <geom name="PRT0001_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="PRT0001.stl" class="visual" />
                 </body>
               </body>
@@ -170,7 +170,7 @@
                 <geom name="KC_C_401L_Up_Forearm_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="KC_C_401L_Up_Forearm_Drive.stl" class="visual" />
                 <body name="PRT0001_2" pos="0.017350 -0.103000 0.018000" quat="0.5000001633974483 0.4999999999999733 -0.4999999999999733 0.49999983660255165">
                   <joint name="dof_left_wrist_00" type="hinge" ref="0.0" class="robstride_00" range="-1.378810 1.378810" axis="0 0 -1" />
-                  <inertial pos="-0.000339 -0.000063 0.027268" quat="1.0 0.0 0.0 0.0" mass="0.469028" diaginertia="0.000279 0.00027 0.000412" />
+                  <inertial pos="-0.000141 0.000442 0.065753" quat="1.0 0.0 0.0 0.0" mass="1.118293" diaginertia="0.002505 0.002028 0.001185" />
                   <geom name="PRT0001_2_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="PRT0001_2.stl" class="visual" />
                 </body>
               </body>
