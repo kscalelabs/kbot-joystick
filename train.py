@@ -1280,7 +1280,6 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             # "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            # "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
