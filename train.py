@@ -1123,6 +1123,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            # kp_scale_range=(0.5, 2.0),
+            kp_scale_range=(1.0, 1.0),
+            # kd_scale_range=(0.5, 2.0), # TODO phase this
+            kd_scale_range=(1.0, 1.0),
+            # action_bias_scale=(0.05), # rad
+            action_bias_scale=(0), # rad
+            # torque_bias_scale=(0.1), # Nm
+            torque_bias_scale=(0), # Nm
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
