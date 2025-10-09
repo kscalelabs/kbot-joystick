@@ -1143,6 +1143,20 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
             "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.15),
+            "collision_body": ksim.CollisionBodyRandomizer.from_geom_names(
+                model=physics_model,
+                geom_names=[
+                    "LFootBushing_GPF_1517_12_collision_capsule_0",
+                    "LFootBushing_GPF_1517_12_collision_capsule_1",
+                    "RFootBushing_GPF_1517_12_collision_capsule_0",
+                    "RFootBushing_GPF_1517_12_collision_capsule_1",
+                ],
+                radius_scale=0.01, # factor
+                length_scale=0.03, # factor
+                position_jitter_x=0.002, # m
+                position_jitter_y=0.001, # m
+                position_jitter_z=0.001, # m
+            )
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
