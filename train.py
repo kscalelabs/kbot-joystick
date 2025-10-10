@@ -1151,9 +1151,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "RFootBushing_GPF_1517_12_collision_capsule_0",
                     "RFootBushing_GPF_1517_12_collision_capsule_1",
                 ],
+                # NOTE be careful the capsules stay inside the touch sensor site boxes!
                 radius_scale=0.01, # factor
                 length_scale=0.03, # factor
-                position_jitter_x=0.01, # m # longitudinal
+                position_jitter_x=0.020, # m # longitudinal
                 position_jitter_y=0.005, # m # vertical
                 position_jitter_z=0.005, # m # lateral
             )
