@@ -1153,9 +1153,9 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 ],
                 radius_scale=0.01, # factor
                 length_scale=0.03, # factor
-                position_jitter_x=0.002, # m
-                position_jitter_y=0.001, # m
-                position_jitter_z=0.001, # m
+                position_jitter_x=0.01, # m # longitudinal
+                position_jitter_y=0.005, # m # vertical
+                position_jitter_z=0.005, # m # lateral
             )
         }
 
