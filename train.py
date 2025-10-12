@@ -736,8 +736,8 @@ class UnifiedCommand(ksim.Command):
         forward_cmd = jnp.concatenate([vx, _, _, _, _, _, __])
         sideways_cmd = jnp.concatenate([_, vy, _, _, _, _, __])
         rotate_cmd = jnp.concatenate([_, _, wz, _, _, _, __])
-        omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms]) # make loc cmd dynamic
-        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms]) # expand and add dynamic -- bh needs expanding -- dynamic necessary for teleop.
+        omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
         stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
