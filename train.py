@@ -1069,7 +1069,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="sine")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot"))
@@ -1088,6 +1088,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
+            kp_scale=1.4, # 2.0 works but is unstable in edge cases
+            kd_scale=1.4,
+            action_bias_scale=0.02, # rad
+            torque_bias_scale=0.0, # Nm
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
@@ -1100,6 +1104,21 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ),
             "all_body_COM": ksim.AllBodiesCOMRandomizer(scale=0.05),
             "all_body_inertia": ksim.AllBodiesInertiaRandomizer(scale=0.15),
+            "collision_body": ksim.CollisionBodyRandomizer.from_geom_names(
+                model=physics_model,
+                geom_names=[
+                    "LFootBushing_GPF_1517_12_collision_capsule_0",
+                    "LFootBushing_GPF_1517_12_collision_capsule_1",
+                    "RFootBushing_GPF_1517_12_collision_capsule_0",
+                    "RFootBushing_GPF_1517_12_collision_capsule_1",
+                ],
+                # NOTE be careful the capsules stay inside the touch sensor site boxes!
+                radius_scale=0.01, # factor
+                length_scale=0.03, # factor
+                position_jitter_x=0.020, # m # longitudinal
+                position_jitter_y=0.005, # m # vertical
+                position_jitter_z=0.005, # m # lateral
+            )
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
@@ -1107,7 +1126,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "force_push": ksim.ForcePushEvent.from_body_name(
                 model=physics_model,
                 body_name="base",
-                max_force=100.0,
+                max_force=200.0,
                 max_torque=10.0,
                 duration_range=(0.1, 0.5),
                 interval_range=(0.0, 6.0),
@@ -1120,7 +1139,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
-            PlaneXYPositionReset(x_range=2.0, y_range=2.0),
+            PlaneXYPositionReset(x_range=0.1, y_range=0.1),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
