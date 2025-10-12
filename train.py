@@ -1104,7 +1104,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
 
     def get_mujoco_model(self) -> mujoco.MjModel:
         mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot-headless", name="robot"))
-        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="smooth")
+        return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="sine")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
         metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot-headless"))
@@ -1123,14 +1123,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            # kp_scale_range=(0.5, 2.0),
-            kp_scale_range=(1.0, 1.0),
-            # kd_scale_range=(0.5, 2.0), # TODO phase this
-            kd_scale_range=(1.0, 1.0),
-            # action_bias_scale=(0.05), # rad
-            action_bias_scale=(0), # rad
-            # torque_bias_scale=(0.1), # Nm
-            torque_bias_scale=(0), # Nm
+            kpd_global_scale=1.0,
+            kp_scale_range=1.4, # 2.0 works but is unstable in edge cases
+            kd_scale_range=1.4,
+            action_bias_scale=0.02, # rad
+            torque_bias_scale=0.0, # Nm
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
@@ -1178,7 +1175,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             ksim.RandomJointVelocityReset(scale=2.0),
             ksim.RandomBaseVelocityXYReset(scale=0.2),
             ksim.RandomHeadingReset(),
-            PlaneXYPositionReset(x_range=2.0, y_range=2.0),
+            PlaneXYPositionReset(x_range=0.1, y_range=0.1),
         ]
 
     def get_observations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Observation]:
