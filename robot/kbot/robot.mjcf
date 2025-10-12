@@ -81,7 +81,7 @@
               <geom name="KD_D_301L_L_Femur_Lower_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="KD_D_301L_L_Femur_Lower_Drive.stl" class="visual" />
               <body name="KD_D_401L_L_Shin_Drive" pos="-0.021000 0.021000 -0.212000" quat="0.5000001633974483 0.4999999999999733 0.49999983660255165 0.4999999999999733">
                 <joint name="dof_left_knee_04" type="hinge" ref="0.0" class="robstride_04" range="0 2.705260" axis="0 0 1" />
-                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" /> 
+                <inertial pos="-0.024116 -0.104308 0.018559" quat="1.0 0.0 0.0 0.0" mass="1.684707" diaginertia="0.014785 0.002991 0.014664" />
                 <geom name="KD_D_401L_L_Shin_Drive_visual" pos="0 0 0" quat="1.0 0.0 0.0 0.0" material="torso_material" type="mesh" mesh="KD_D_401L_L_Shin_Drive.stl" class="visual" />
                 <body name="LFootBushing_GPF_1517_12" pos="-0.030000 -0.290000 0.000950" quat="-1.7320510330969933e-07 0.999999999999985 0.0 -0.0">
                   <joint name="dof_left_ankle_02" type="hinge" ref="0.0" class="robstride_02" range="-1.134464 0.261799" axis="0 0 -1" />
