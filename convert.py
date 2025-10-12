@@ -40,7 +40,7 @@ def main() -> None:
 
     joint_names_policy = ksim.get_joint_names_in_order(mujoco_model)[1:]  # Removes the root joint.
     joint_names_passthrough = [
-        "dof_right_wrist_gripper_05", 
+        "dof_right_wrist_gripper_05",
         "dof_left_wrist_gripper_05",
     ]
     joint_names = joint_names_policy + joint_names_passthrough
@@ -59,7 +59,7 @@ def main() -> None:
         "basepitch",
         "rshoulderpitch",
         "rshoulderroll",
-        "rshoulderyaw", 
+        "rshoulderyaw",
         "relbowpitch",
         "rwristroll",
         "lshoulderpitch",
@@ -70,7 +70,7 @@ def main() -> None:
         # cmds that are passed through directly:
         "rgripper",
         "lgripper",
-    ] # len 16 + 2
+    ]  # len 16 + 2
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
@@ -103,8 +103,8 @@ def main() -> None:
 
         obs = jnp.concatenate(
             [
-                task.normalize_joint_pos(joint_angles[:len(joint_names_policy)]),
-                task.normalize_joint_vel(joint_angular_velocities[:len(joint_names_policy)]),
+                task.normalize_joint_pos(joint_angles[: len(joint_names_policy)]),
+                task.normalize_joint_vel(joint_angular_velocities[: len(joint_names_policy)]),
                 task.encode_projected_gravity(projected_gravity),
                 gyroscope,
                 cmd_zero,
@@ -125,7 +125,7 @@ def main() -> None:
         # Flattens the new carry.
         new_carry_pt = Carry(actor_carry=new_carry, lpf_params=lpf_params)
         new_carry_flat, _ = ravel_pytree(new_carry_pt)
-        
+
         return action, new_carry_flat
 
     init_onnx = export_fn(

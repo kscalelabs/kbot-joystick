@@ -1085,10 +1085,10 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            kp_scale=1.4, # 2.0 works but is unstable in edge cases
+            kp_scale=1.4,  # 2.0 works but is unstable in edge cases
             kd_scale=1.4,
-            action_bias_scale=0.02, # rad
-            torque_bias_scale=0.0, # Nm
+            action_bias_scale=0.02,  # rad
+            torque_bias_scale=0.0,  # Nm
         )
 
     def get_physics_randomizers(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.PhysicsRandomizer]:
@@ -1110,12 +1110,12 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                     "RFootBushing_GPF_1517_12_collision_capsule_1",
                 ],
                 # NOTE be careful the capsules stay inside the touch sensor site boxes!
-                radius_scale=0.01, # factor
-                length_scale=0.03, # factor
-                position_jitter_x=0.020, # m # longitudinal
-                position_jitter_y=0.005, # m # vertical
-                position_jitter_z=0.005, # m # lateral
-            )
+                radius_scale=0.01,  # factor
+                length_scale=0.03,  # factor
+                position_jitter_x=0.020,  # m # longitudinal
+                position_jitter_y=0.005,  # m # vertical
+                position_jitter_z=0.005,  # m # lateral
+            ),
         }
 
     def get_events(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Event]:
@@ -1180,7 +1180,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 framequat_name="imu_site_quat",
                 noise=ksim.AdditiveGaussianNoise(std=math.radians(3)),
                 min_lag=0.0,
-                max_lag=0.75, # 0.75 is effectively 3 timesteps so 60ms
+                max_lag=0.75,  # 0.75 is effectively 3 timesteps so 60ms
                 bias=math.radians(4),
             ),
             "projected_gravity": ksim.ProjectedGravityObservation.create(
