@@ -1123,8 +1123,8 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
         return ksim.PositionActuators(
             physics_model=physics_model,
             metadata=metadata,
-            kp_scale_range=1.4, # 2.0 works but is unstable in edge cases
-            kd_scale_range=1.4,
+            kp_scale=1.4, # 2.0 works but is unstable in edge cases
+            kd_scale=1.4,
             action_bias_scale=0.02, # rad
             torque_bias_scale=0.0, # Nm
         )
