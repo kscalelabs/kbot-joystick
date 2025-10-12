@@ -95,7 +95,7 @@
                   <geom name="LFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1017 0.038000 -0.030886 0.055821 0.038000 -0.030886" size="0.020000" material="torso_material" class="visual" />
                   <geom name="LFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1127 0.038000 0.000954 0.055821 0.038000 0.000954" size="0.020000" material="collision_material" class="collision" />
                   <geom name="LFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1127 0.038000 0.000954 0.055821 0.038000 0.000954" size="0.020000" material="torso_material" class="visual" />
-                  <site name="left_foot" size="0.108 0.022 0.038" pos="-0.0290 0.038 -0.0150" type="box" />
+                  <site name="left_foot" size="0.138 0.032 0.043" pos="-0.0290 0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
@@ -125,7 +125,7 @@
                   <geom name="RFootBushing_GPF_1517_12_visual_capsule_0" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1017 -0.038000 -0.030886 0.055821 -0.038000 -0.030886" size="0.020000" material="torso_material" class="visual" />
                   <geom name="RFootBushing_GPF_1517_12_collision_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1127 -0.038000 0.000954 0.055821 -0.038000 0.000954" size="0.020000" material="collision_material" class="collision" />
                   <geom name="RFootBushing_GPF_1517_12_visual_capsule_1" type="capsule" quat="1.000000 0.000000 0.000000 0.000000" fromto="-0.1127 -0.038000 0.000954 0.055821 -0.038000 0.000954" size="0.020000" material="torso_material" class="visual" />
-                  <site name="right_foot" size="0.108 0.022 0.038" pos="-0.0290 -0.038 -0.0150" type="box" />
+                  <site name="right_foot" size="0.138 0.032 0.043" pos="-0.0290 -0.038 -0.0150" type="box" />
                 </body>
               </body>
             </body>
