@@ -1215,14 +1215,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
+            "base_height": TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.73,
+                standard_height=0.75,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
@@ -1237,7 +1237,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 scale=0.1,
                 error_scale=0.02,
             ),
-            # "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
+            "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
         }
