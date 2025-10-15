@@ -1087,6 +1087,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             metadata=metadata,
             kp_scale=1.4,  # 2.0 works but is unstable in edge cases
             kd_scale=1.4,
+            torque_limit_scale=1.5,
             action_bias_scale=0.02,  # rad
             torque_bias_scale=0.0,  # Nm
         )
@@ -1214,14 +1215,14 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
+            "base_height": TerrainBaseHeightReward.create(
                 physics_model=physics_model,
                 base_body_name="base",
                 foot_left_body_name="LFootBushing_GPF_1517_12",
                 foot_right_body_name="RFootBushing_GPF_1517_12",
                 scale=0.2,
                 error_scale=0.02,
-                standard_height=0.78,
+                standard_height=0.80,
                 foot_origin_height=0.06,
             ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
