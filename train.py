@@ -1087,7 +1087,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             metadata=metadata,
             kp_scale=1.4,  # 2.0 works but is unstable in edge cases
             kd_scale=1.4,
-            torque_limit_scale=1.5,
+            torque_limit_scale_low=0.5,
             action_bias_scale=0.02,  # rad
             torque_bias_scale=0.0,  # Nm
         )
