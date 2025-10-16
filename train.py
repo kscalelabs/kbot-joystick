@@ -1232,18 +1232,18 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
-                physics_model=physics_model,
-                base_body_name="base",
-                foot_left_body_name="LFootBushing_GPF_1517_12",
-                foot_right_body_name="RFootBushing_GPF_1517_12",
-                scale=0.2,
-                error_scale=0.02,
-                standard_height=0.73,
-                foot_origin_height=0.06,
-            ),
+            # "base_height": TerrainBaseHeightReward.create(  # TODO fix base origin location
+            #     physics_model=physics_model,
+            #     base_body_name="base",
+            #     foot_left_body_name="LFootBushing_GPF_1517_12",
+            #     foot_right_body_name="RFootBushing_GPF_1517_12",
+            #     scale=0.2,
+            #     error_scale=0.02,
+            #     standard_height=0.73,
+            #     foot_origin_height=0.06,
+            # ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
-            # shaping
+            # shaping 
             "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
             "no_contact_p": NoContactPenalty(scale=0.1),
             "feet_airtime": FeetAirtimeReward(scale=1.5, ctrl_dt=self.config.ctrl_dt, touchdown_penalty=0.4),
@@ -1257,7 +1257,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
-            "action_vel": ksim.ActionVelocityPenalty(scale=0.05),
+            "action_vel": ksim.ActionVelocityPenalty(scale=0.05),  #maybe not needed since we want high vel change
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:

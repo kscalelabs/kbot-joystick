@@ -1,0 +1,144 @@
+action_clip_max: 1000.0
+action_latency_range:
+- 0.003
+- 0.01
+actor_mirror_loss_scale: 0.0
+actuator_update_dt: null
+adam_weight_decay: 1.0e-05
+adaptive_kl: false
+all_rewards_plot_figsize_multiplier: 1.5
+batch_size: 512
+clip_param: 0.2
+collect_dataset: false
+collect_dataset_argmax_action: false
+compile:
+  cache_dir: /home/jiaan/.cache/jax/jaxcache
+  cache_enable_xla: none
+  cache_min_compile_time_secs: 0.0
+  cache_min_size_bytes: -1
+  debug_nans: false
+  default_device: null
+  disable_jit: false
+  enable_x64: false
+  logging_level: INFO
+cpu_stats:
+  only_log_once: false
+  ping_interval: 1
+critic_mirror_loss_scale: 0.0
+ctrl_dt: 0.02
+cutoff_frequency: 10.0
+dataset_num_batches: 1
+dataset_save_path: null
+debug_dataloader: false
+depth: 2
+desired_kl: 0.01
+disable_euler_damping: true
+disable_multiprocessing: false
+drop_action_prob: 0.05
+dt: 0.004
+entropy_coef: 0.004
+exclude_combined_reward_components: []
+exp_dir: null
+gamma: 0.94
+gpu_stats:
+  only_log_once: false
+  ping_interval: 10
+hidden_size: 256
+integrator: implicitfast
+iterations: 8
+kl_coef: 0.001
+lam: 0.94
+learning_rate: 0.0005
+live_reward_buffer_size: 4
+load_from_ckpt_path: null
+log_all_images: false
+log_clip_value: 5.0
+log_interval_seconds: 1.0
+log_to_file: true
+log_train_metrics: true
+lr_decay_steps: 19200000
+lr_final_multiplier: 0.01
+ls_iterations: 8
+max_steps: null
+max_values_per_plot: 50
+monte_carlo_returns: false
+multiprocessing_context: spawn
+normalize_advantages: true
+num_compiled_steps_to_log: 3
+num_envs: 4096
+num_passes: 3
+only_save_most_recent: true
+plot_figsize:
+- 8.0
+- 4.0
+profile_memory: false
+raise_dataloader_errors: false
+random_seed: 1337
+render_azimuth: 90.0
+render_camera_name: null
+render_contact_force: false
+render_contact_point: false
+render_distance: 3.5
+render_elevation: -10.0
+render_fps: 24
+render_height: 480
+render_inertia: false
+render_length_seconds: 10.0
+render_lookat:
+- 0.0
+- 0.0
+- 0.5
+render_markers: false
+render_reflection: false
+render_shadow: false
+render_slowdown: 1.0
+render_track_body_id: 0
+render_width: 640
+reward_clip_max: null
+reward_clip_min: null
+rollout_length_frames: null
+rollout_length_seconds: 2.0
+run_mode: train
+save_every_n_seconds: 60.0
+save_every_n_steps: null
+solver: newton
+step_kind: step
+tensorboard_log_interval_seconds: 10.0
+throw_on_weak_type: true
+tolerance: 1.0e-10
+train_dl:
+  error:
+    backoff_after: 5
+    flush_every_n_seconds: 10.0
+    flush_every_n_steps: null
+    log_exceptions_all_workers: false
+    maximum_exceptions: 10
+    sleep_backoff: 0.1
+    sleep_backoff_power: 2.0
+    traceback_depth: 5
+  num_workers: 32
+  prefetch_factor: 2
+use_clipped_value_loss: true
+use_lr_decay: false
+valid_dl:
+  error:
+    backoff_after: 5
+    flush_every_n_seconds: 10.0
+    flush_every_n_steps: null
+    log_exceptions_all_workers: false
+    maximum_exceptions: 10
+    sleep_backoff: 0.1
+    sleep_backoff_power: 2.0
+    traceback_depth: 5
+  num_workers: 1
+  prefetch_factor: 2
+valid_every_n_seconds: null
+valid_every_n_steps: 100
+valid_first_n_seconds: null
+valid_first_n_steps: 1
+value_loss_coef: 0.5
+var_scale: 0.5
+viewer_argmax_action: true
+viewer_num_seconds: null
+viewer_save_renders: false
+viewer_save_video: false
