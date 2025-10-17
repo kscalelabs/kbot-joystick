@@ -733,7 +733,7 @@ class UnifiedCommand(ksim.Command):
         sideways_cmd = jnp.concatenate([_, vy, _, _, _, _, __])
         rotate_cmd = jnp.concatenate([_, _, wz, _, _, _, __])
         omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms])
-        stand_bend_cmd = jnp.concatenate([_, _, _, _, rx, ry, arms])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
         stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
@@ -1087,7 +1087,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             metadata=metadata,
             kp_scale=1.4,  # 2.0 works but is unstable in edge cases
             kd_scale=1.4,
-            torque_limit_scale_low=0.5,
+            torque_limit_scale=1.5,
             action_bias_scale=0.02,  # rad
             torque_bias_scale=0.0,  # Nm
         )
@@ -1215,6 +1215,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
+            "base_height": TerrainBaseHeightReward.create(
+                physics_model=physics_model,
+                base_body_name="base",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
+                scale=0.2,
+                error_scale=0.02,
+                standard_height=0.80,
+                foot_origin_height=0.06,
+            ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
