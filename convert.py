@@ -14,7 +14,7 @@ from kinfer.export.jax import export_fn
 from kinfer.export.serialize import pack
 from kinfer.rust_bindings import PyModelMetadata
 
-from train import HumanoidWalkingTask, Model
+from train import HumanoidWalkingTask, Model, JOINT_BIASES
 
 
 @jax.tree_util.register_dataclass
@@ -66,6 +66,7 @@ def main() -> None:
 
     metadata = PyModelMetadata(
         joint_names=joint_names,
+        joint_biases=list(JOINT_BIASES.values()),
         command_names=command_names,
         carry_size=(depth * 2 * hidden_size + len(joint_names),),
     )
