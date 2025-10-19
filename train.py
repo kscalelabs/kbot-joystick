@@ -733,8 +733,7 @@ class UnifiedCommand(ksim.Command):
         sideways_cmd = jnp.concatenate([_, vy, _, _, _, _, __])
         rotate_cmd = jnp.concatenate([_, _, wz, _, _, _, __])
         omni_cmd = jnp.concatenate([vx, vy, wz, _, _, _, arms])
-        # stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
-        stand_bend_cmd = jnp.concatenate([_, _, _, _, rx, ry, arms])
+        stand_bend_cmd = jnp.concatenate([_, _, _, bh, rx, ry, arms])
         stand_cmd = jnp.concatenate([_, _, _, _, _, _, __])
 
         # randomly select a mode
@@ -1066,11 +1065,11 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             return optax.chain(optax.adamw(learning_rate=cosine_schedule, weight_decay=self.config.adam_weight_decay))
 
     def get_mujoco_model(self) -> mujoco.MjModel:
-        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/bigfoot", name="robot"))
+        mjcf_path = asyncio.run(ksim.get_mujoco_model_path("robot/kbot-headless", name="robot"))
         return mujoco_scenes.mjcf.load_mjmodel(mjcf_path, scene="sine")
 
     def get_mujoco_model_metadata(self, mj_model: mujoco.MjModel) -> ksim.Metadata:
-        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/bigfoot"))
+        metadata = asyncio.run(ksim.get_mujoco_model_metadata("robot/kbot-headless"))
         if metadata.joint_name_to_metadata is None:
             raise ValueError("Joint metadata is not available")
         if metadata.actuator_type_to_metadata is None:
@@ -1216,16 +1215,16 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "linvel": LinearVelocityTrackingReward(scale=0.2, error_scale=0.2),
             "angvel": AngularVelocityReward(scale=0.1, error_scale=0.2),
             "roll_pitch": XYOrientationReward(scale=0.2, error_scale=0.03, error_scale_zero_cmd=0.01),
-            # "base_height": TerrainBaseHeightReward.create(
-            #     physics_model=physics_model,
-            #     base_body_name="base",
-            #     foot_left_body_name="LFootBushing_GPF_1517_12",
-            #     foot_right_body_name="RFootBushing_GPF_1517_12",
-            #     scale=0.2,
-            #     error_scale=0.02,
-            #     standard_height=0.75,
-            #     foot_origin_height=0.06,
-            # ),
+            "base_height": TerrainBaseHeightReward.create(
+                physics_model=physics_model,
+                base_body_name="base",
+                foot_left_body_name="LFootBushing_GPF_1517_12",
+                foot_right_body_name="RFootBushing_GPF_1517_12",
+                scale=0.2,
+                error_scale=0.02,
+                standard_height=0.75,
+                foot_origin_height=0.06,
+            ),
             "arm_pos": ArmPositionReward.create_reward(physics_model, scale=0.2, error_scale=0.1),
             # shaping
             "single_contact": SingleFootContactReward(scale=0.1, ctrl_dt=self.config.ctrl_dt, grace_period=2.0),
@@ -1253,7 +1252,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 unhealthy_z=0.35,  # for base body origin
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
-            "episode_length": ksim.EpisodeLengthTermination(max_length_sec=16),
+            "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
         }
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
