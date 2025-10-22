@@ -1265,7 +1265,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
                 unhealthy_z=0.35,  # for base body origin
             ),
             "not_upright": ksim.NotUprightTermination(max_radians=math.radians(45)),
-            "episode_length": ksim.EpisodeLengthTermination(max_length_sec=24),
+            "episode_length": ksim.EpisodeLengthTermination(max_length_sec=12),
         }
 
     def get_curriculum(self, physics_model: ksim.PhysicsModel) -> ksim.Curriculum:
