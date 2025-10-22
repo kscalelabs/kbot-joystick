@@ -494,6 +494,18 @@ class BaseAccelerationReward(ksim.Reward):
         return jnp.exp(-error / self.error_scale)
 
 
+@attrs.define(frozen=True, kw_only=True)
+class TorqueReward(ksim.Reward):
+    """Reward for minimizing joint torque."""
+
+    error_scale: float = attrs.field(default=1.0)
+
+    def get_reward(self, trajectory: ksim.Trajectory) -> Array:
+        error = jnp.abs(trajectory.ctrl)  # (T, 20)
+        is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
+        return jnp.where(is_zero_cmd, jnp.sum(jnp.exp(-error / self.error_scale), axis=-1), 1.0)
+
+
 @attrs.define(frozen=True)
 class COMDistanceObservation(ksim.Observation):
     """Observes the distance between the robot's center of mass (COM) and the centroid of its support polygon.
@@ -1240,6 +1252,7 @@ class HumanoidWalkingTask(ksim.PPOTask[HumanoidWalkingTaskConfig]):
             "com_distance": COMDistanceReward(scale=0.05, error_scale=0.04),
             # sim2real
             "base_accel": BaseAccelerationReward(scale=0.1, error_scale=5.0),
+            "torque": TorqueReward(scale=0.1, error_scale=5.0),
         }
 
     def get_terminations(self, physics_model: ksim.PhysicsModel) -> dict[str, ksim.Termination]:
