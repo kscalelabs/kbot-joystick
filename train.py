@@ -503,7 +503,7 @@ class TorqueReward(ksim.Reward):
     def get_reward(self, trajectory: ksim.Trajectory) -> Array:
         error = jnp.abs(trajectory.ctrl)  # (T, 20)
         is_zero_cmd = jnp.linalg.norm(trajectory.command["unified_command"][:, :3], axis=-1) < 1e-3
-        return jnp.where(is_zero_cmd, jnp.sum(jnp.exp(-error / self.error_scale), axis=-1), 1.0)
+        return jnp.where(is_zero_cmd, jnp.mean(jnp.exp(-error / self.error_scale), axis=-1), 1.0)
 
 
 @attrs.define(frozen=True)
